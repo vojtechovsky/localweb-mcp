@@ -33,6 +33,7 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
     private IBrowser? _browser;
     private bool _disposed;
 
+    /// <summary>Initializes the browser fetcher; Chromium is launched lazily.</summary>
     public PlaywrightFetcher(IOptions<LocalWebOptions> options, UrlGuard guard, ILogger<PlaywrightFetcher> logger)
     {
         _options = options.Value;
@@ -41,6 +42,9 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
         _pageLimit = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentBrowserPages));
     }
 
+    /// <summary>Renders a URL in a fresh browser context and returns the HTML.</summary>
+    /// <param name="url">Validated absolute URL.</param>
+    /// <param name="cancellationToken">Caller cancellation token; closes the context on cancel.</param>
     public async Task<RenderedPage> RenderAsync(Uri url, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -105,6 +109,13 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
             }
 
             var html = await page.ContentAsync().ConfigureAwait(false);
+            if (html.Length > _options.MaxResponseBytes)
+            {
+                _logger.LogWarning(
+                    "Rendered HTML for {Url} exceeded MaxResponseBytes and was truncated.", url);
+                html = html[.._options.MaxResponseBytes];
+            }
+
             return new RenderedPage(page.Url, html);
         }
         catch (PlaywrightException ex)
@@ -233,6 +244,7 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
         }
     }
 
+    /// <summary>Drains in-flight renders and shuts the browser down.</summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)

@@ -20,6 +20,7 @@ public sealed class HttpFetcher : IDisposable
     private readonly ILogger<HttpFetcher> _logger;
     private readonly HttpClient _http;
 
+    /// <summary>Initializes a new HTTP fetcher with IP-pinned connections.</summary>
     public HttpFetcher(IOptions<LocalWebOptions> options, UrlGuard guard, ILogger<HttpFetcher> logger)
     {
         _options = options.Value;
@@ -46,6 +47,10 @@ public sealed class HttpFetcher : IDisposable
         _http.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1");
     }
 
+    /// <summary>Fetches a URL over HTTP, following and re-validating redirects.</summary>
+    /// <param name="url">Validated absolute URL.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
+    /// <returns>The response body and its content type.</returns>
     public async Task<HttpFetchResponse> FetchAsync(Uri url, CancellationToken cancellationToken)
     {
         // Bound the ENTIRE request (connect + headers + body). HttpClient.Timeout
@@ -111,6 +116,63 @@ public sealed class HttpFetcher : IDisposable
 
                 var (body, truncated) = await ReadBodyAsync(response, current, token).ConfigureAwait(false);
                 return new HttpFetchResponse(current, mediaType, body, truncated);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Follows redirects with HEAD requests (no body) and returns the final
+    /// validated URI. Used before handing a URL to the browser, whose own
+    /// redirect hops are not seen by the request router. A server that does not
+    /// answer HEAD simply returns the current URL.
+    /// </summary>
+    public async Task<Uri> ResolveRedirectsAsync(Uri url, CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.HttpTimeoutSeconds));
+        var token = timeoutCts.Token;
+
+        var current = url;
+        var redirects = 0;
+
+        while (true)
+        {
+            await _guard.ValidateAsync(current, token).ConfigureAwait(false);
+
+            using var request = new HttpRequestMessage(HttpMethod.Head, current);
+            HttpResponseMessage response;
+            try
+            {
+                response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new LocalWebException($"Resolving {current} timed out after {_options.HttpTimeoutSeconds}s.", ex);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new LocalWebException($"Could not resolve {current}: {ex.Message}", ex);
+            }
+
+            using (response)
+            {
+                if (IsRedirect(response.StatusCode) && response.Headers.Location is not null)
+                {
+                    if (redirects >= _options.MaxRedirects)
+                    {
+                        throw new LocalWebException($"Too many redirects (maximum {_options.MaxRedirects}) for {url}.");
+                    }
+
+                    var location = response.Headers.Location;
+                    var next = location.IsAbsoluteUri ? location : new Uri(current, location);
+                    await _guard.ValidateAsync(next, token).ConfigureAwait(false);
+                    current = next;
+                    redirects++;
+                    continue;
+                }
+
+                return current;
             }
         }
     }
@@ -220,5 +282,6 @@ public sealed class HttpFetcher : IDisposable
         HttpStatusCode.TemporaryRedirect or
         HttpStatusCode.PermanentRedirect;
 
+    /// <summary>Disposes the underlying HTTP client.</summary>
     public void Dispose() => _http.Dispose();
 }

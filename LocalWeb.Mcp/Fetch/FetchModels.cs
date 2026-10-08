@@ -21,8 +21,13 @@ public sealed record RenderedPage(string FinalUrl, string Html);
 /// <summary>Origin of the returned content.</summary>
 public enum FetchSource
 {
+    /// <summary>Retrieved over plain HTTP.</summary>
     Http,
+
+    /// <summary>Rendered by the headless browser.</summary>
     Browser,
+
+    /// <summary>Served from the cache.</summary>
     Cache,
 }
 

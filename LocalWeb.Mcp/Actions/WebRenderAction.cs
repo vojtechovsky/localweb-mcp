@@ -16,12 +16,14 @@ public sealed class WebRenderAction
     private readonly PageFetcher _fetcher;
     private readonly ILogger<WebRenderAction> _logger;
 
+    /// <summary>Initializes the action.</summary>
     public WebRenderAction(PageFetcher fetcher, ILogger<WebRenderAction> logger)
     {
         _fetcher = fetcher;
         _logger = logger;
     }
 
+    /// <summary>Render handler exposed as the <c>web_render</c> MCP tool.</summary>
     [McpServerTool(Name = "web_render", Title = "Render page", ReadOnly = true, OpenWorld = true)]
     [Description("Render a URL in a headless browser and return the main content as Markdown. Use for JavaScript-heavy pages.")]
     public async Task<string> WebRenderAsync(

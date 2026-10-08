@@ -15,11 +15,16 @@ public sealed class LinkExtractor
     private readonly ILogger<LinkExtractor> _logger;
     private readonly HtmlParser _parser = new();
 
+    /// <summary>Initializes a new link extractor.</summary>
     public LinkExtractor(ILogger<LinkExtractor> logger)
     {
         _logger = logger;
     }
 
+    /// <summary>Extracts unique http(s) links from HTML.</summary>
+    /// <param name="html">Raw HTML.</param>
+    /// <param name="pageUrl">The page URL, used to resolve relative links.</param>
+    /// <param name="maxLinks">Maximum number of links to return.</param>
     public IReadOnlyList<LinkItem> Extract(string html, string pageUrl, int maxLinks)
     {
         if (string.IsNullOrWhiteSpace(html))

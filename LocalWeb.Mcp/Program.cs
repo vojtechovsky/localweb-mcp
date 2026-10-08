@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using LocalWeb.Mcp.Cache;
+using LocalWeb.Mcp.Composition;
 using LocalWeb.Mcp.Fetch;
 using LocalWeb.Mcp.Options;
 using LocalWeb.Mcp.Search;
@@ -58,16 +59,13 @@ builder.Services.AddOptions<LocalWebOptions>()
     .Validate(o => Uri.TryCreate(o.SearxngUrl, UriKind.Absolute, out _), "LocalWeb:SearxngUrl must be an absolute URL.")
     .ValidateOnStart();
 
+// The loopback bypass is test-only: configuration/env cannot enable it, only the
+// explicit --allow-loopback command-line flag can.
+builder.Services.PostConfigure<LocalWebOptions>(options => options.AllowLoopbackForTests = commandLine.AllowLoopback);
+
 // Local web layer. The MCP tool types in Actions/ are discovered and constructed
 // per call by WithToolsFromAssembly, so they are not registered here.
-builder.Services.AddSingleton<UrlGuard>();
-builder.Services.AddSingleton<SqliteCache>();
-builder.Services.AddSingleton<SearxngClient>();
-builder.Services.AddSingleton<HttpFetcher>();
-builder.Services.AddSingleton<PlaywrightFetcher>();
-builder.Services.AddSingleton<ContentExtractor>();
-builder.Services.AddSingleton<LinkExtractor>();
-builder.Services.AddSingleton<PageFetcher>();
+builder.Services.AddLocalWebServices();
 
 // stdout belongs to the MCP protocol, so every log line must go to stderr.
 builder.Logging.ClearProviders();

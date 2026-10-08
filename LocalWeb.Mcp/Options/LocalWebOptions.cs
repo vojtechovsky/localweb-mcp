@@ -6,6 +6,7 @@ namespace LocalWeb.Mcp.Options;
 /// </summary>
 public sealed class LocalWebOptions
 {
+    /// <summary>Name of the configuration section bound to <see cref="LocalWebOptions"/>.</summary>
     public const string SectionName = "LocalWeb";
 
     /// <summary>Base URL of the local SearXNG instance (no trailing slash required).</summary>

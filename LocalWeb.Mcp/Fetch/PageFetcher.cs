@@ -30,6 +30,7 @@ public sealed class PageFetcher
     private readonly LocalWebOptions _options;
     private readonly ILogger<PageFetcher> _logger;
 
+    /// <summary>Initializes the fetch pipeline.</summary>
     public PageFetcher(
         HttpFetcher http,
         PlaywrightFetcher browser,
@@ -48,6 +49,11 @@ public sealed class PageFetcher
         _logger = logger;
     }
 
+    /// <summary>Fetches a page and returns its extracted content as Markdown.</summary>
+    /// <param name="url">Validated absolute URL.</param>
+    /// <param name="forceBrowser">Skip the HTTP path and render in the browser.</param>
+    /// <param name="bypassCache">Ignore any cached result.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
     public async Task<FetchOutcome> FetchAsync(
         Uri url,
         bool forceBrowser,
@@ -177,7 +183,8 @@ public sealed class PageFetcher
 
     private async Task<RawPage> RenderRawAsync(Uri url, CancellationToken cancellationToken)
     {
-        var page = await _browser.RenderAsync(url, cancellationToken).ConfigureAwait(false);
+        var resolved = await _http.ResolveRedirectsAsync(url, cancellationToken).ConfigureAwait(false);
+        var page = await _browser.RenderAsync(resolved, cancellationToken).ConfigureAwait(false);
         var extracted = _extractor.Extract(page.FinalUrl, page.Html);
         return new RawPage(extracted.Title, page.FinalUrl, page.Html, FetchSource.Browser);
     }
@@ -213,7 +220,10 @@ public sealed class PageFetcher
 
     private async Task<FetchOutcome> FetchWithBrowserAsync(Uri url, CancellationToken cancellationToken)
     {
-        var page = await _browser.RenderAsync(url, cancellationToken).ConfigureAwait(false);
+        // Resolve redirects first (validated, IP-pinned) because the browser's own
+        // redirect hops are invisible to the request router.
+        var resolved = await _http.ResolveRedirectsAsync(url, cancellationToken).ConfigureAwait(false);
+        var page = await _browser.RenderAsync(resolved, cancellationToken).ConfigureAwait(false);
         var extracted = _extractor.Extract(page.FinalUrl, page.Html);
 
         if (string.IsNullOrWhiteSpace(extracted.Markdown))

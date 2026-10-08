@@ -19,6 +19,7 @@ public sealed class WebSearchAction
     private readonly LocalWebOptions _options;
     private readonly ILogger<WebSearchAction> _logger;
 
+    /// <summary>Initializes the action.</summary>
     public WebSearchAction(
         SearxngClient searxng,
         SqliteCache cache,
@@ -31,6 +32,7 @@ public sealed class WebSearchAction
         _logger = logger;
     }
 
+    /// <summary>Search handler exposed as the <c>web_search</c> MCP tool.</summary>
     [McpServerTool(Name = "web_search", Title = "Web search", ReadOnly = true, OpenWorld = true)]
     [Description("Search the web via the local SearXNG instance. Returns titles, URLs and snippets.")]
     public async Task<string> WebSearchAsync(
@@ -57,52 +59,75 @@ public sealed class WebSearchAction
             page = 1;
         }
 
-        var cacheKey = CacheKeys.Search(query, language, page, maxResults);
+        // The cache key deliberately excludes maxResults so one entry serves every
+        // result count; the full set is cached and sliced for each caller.
+        var cacheKey = CacheKeys.Search(query, language, page);
+
+        SearchResponse? response = null;
 
         if (!bypassCache)
         {
             var cached = await _cache.GetAsync(cacheKey, cancellationToken).ConfigureAwait(false);
             if (cached is not null)
             {
-                CachedSearch? entry = null;
-                try
-                {
-                    entry = JsonSerializer.Deserialize<CachedSearch>(cached);
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning(ex, "Ignoring a corrupt search cache entry.");
-                }
-
+                var entry = TryReadCache(cached);
                 if (entry is { IsError: true })
                 {
                     throw new McpException(entry.Error ?? "Cached error.");
                 }
 
-                if (entry?.Text is not null)
-                {
-                    return entry.Text;
-                }
+                response = entry?.Response;
             }
         }
 
+        if (response is null)
+        {
+            try
+            {
+                response = await _searxng.SearchAsync(query, _options.MaxMaxResults, language, page, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await TryCacheAsync(cacheKey, new CachedSearch(false, null, response),
+                    TimeSpan.FromMinutes(_options.SearchTtlMinutes), cancellationToken).ConfigureAwait(false);
+            }
+            catch (LocalWebException ex)
+            {
+                _logger.LogWarning(ex, "web_search failed for {Query}.", query);
+                await TryCacheAsync(cacheKey, new CachedSearch(true, ex.Message, null),
+                    TimeSpan.FromMinutes(_options.ErrorTtlMinutes), CancellationToken.None).ConfigureAwait(false);
+                throw new McpException(ex.Message);
+            }
+        }
+
+        return OutputFormatter.FormatSearch(query, Limit(response, maxResults));
+    }
+
+    private static SearchResponse Limit(SearchResponse response, int maxResults)
+    {
+        if (response.Results.Count <= maxResults)
+        {
+            return response;
+        }
+
+        return new SearchResponse
+        {
+            Query = response.Query,
+            NumberOfResults = response.NumberOfResults,
+            Results = response.Results.Take(maxResults).ToList(),
+            Suggestions = response.Suggestions,
+        };
+    }
+
+    private CachedSearch? TryReadCache(string value)
+    {
         try
         {
-            var response = await _searxng.SearchAsync(query, maxResults, language, page, cancellationToken)
-                .ConfigureAwait(false);
-            var text = OutputFormatter.FormatSearch(query, response);
-
-            await TryCacheAsync(cacheKey, new CachedSearch(false, null, text),
-                TimeSpan.FromMinutes(_options.SearchTtlMinutes), cancellationToken).ConfigureAwait(false);
-
-            return text;
+            return JsonSerializer.Deserialize<CachedSearch>(value);
         }
-        catch (LocalWebException ex)
+        catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "web_search failed for {Query}.", query);
-            await TryCacheAsync(cacheKey, new CachedSearch(true, ex.Message, null),
-                TimeSpan.FromMinutes(_options.ErrorTtlMinutes), CancellationToken.None).ConfigureAwait(false);
-            throw new McpException(ex.Message);
+            _logger.LogWarning(ex, "Ignoring a corrupt search cache entry.");
+            return null;
         }
     }
 
@@ -118,5 +143,5 @@ public sealed class WebSearchAction
         }
     }
 
-    private sealed record CachedSearch(bool IsError, string? Error, string? Text);
+    private sealed record CachedSearch(bool IsError, string? Error, SearchResponse? Response);
 }

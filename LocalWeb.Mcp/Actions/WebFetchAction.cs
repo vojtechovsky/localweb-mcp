@@ -17,12 +17,14 @@ public sealed class WebFetchAction
     private readonly PageFetcher _fetcher;
     private readonly ILogger<WebFetchAction> _logger;
 
+    /// <summary>Initializes the action.</summary>
     public WebFetchAction(PageFetcher fetcher, ILogger<WebFetchAction> logger)
     {
         _fetcher = fetcher;
         _logger = logger;
     }
 
+    /// <summary>Fetch handler exposed as the <c>web_fetch</c> MCP tool.</summary>
     [McpServerTool(Name = "web_fetch", Title = "Fetch page", ReadOnly = true, OpenWorld = true)]
     [Description("Fetch a URL and return its main content as Markdown. Uses HTTP first, with a browser fallback for JavaScript-heavy pages.")]
     public async Task<string> WebFetchAsync(

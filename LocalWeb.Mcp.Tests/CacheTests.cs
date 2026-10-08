@@ -72,8 +72,8 @@ public sealed class CacheTests : IAsyncLifetime
     public void CacheKeys_are_deterministic_and_normalize_urls()
     {
         Assert.Equal(
-            CacheKeys.Search("Hello", "EN", 1, 8),
-            CacheKeys.Search("  hello  ", "en", 1, 8));
+            CacheKeys.Search("Hello", "EN", 1),
+            CacheKeys.Search("  hello  ", "en", 1));
 
         Assert.Equal(
             CacheKeys.Fetch("https://Example.com/Path#frag", "auto"),

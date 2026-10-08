@@ -124,12 +124,12 @@ environment variables (`LocalWeb__SearxngUrl=...`) and command-line options.
 | `MaxMaxResults` | `20` | Upper bound `web_search` clamps to. |
 | `MinExtractCharsForBrowser` | `400` | Extracted text below this triggers the browser fallback. |
 | `UserAgent` | `LocalWebMcp/1.0` | |
-| `AllowLoopbackForTests` | `false` | **Testing only.** Disables SSRF blocking for loopback; logs a warning at startup when enabled. |
+| `AllowLoopbackForTests` | `false` | **Testing only.** Enabled solely by the `--allow-loopback` command-line flag; configuration/env cannot set it. |
 
 Command-line options: `--searxng-url`, `--cache-path`, `--log-level`,
 `--http-timeout`, `--browser-timeout`, `--install-browser`,
-`--install-browser-deps`. Unknown arguments are ignored, and help/errors are
-written to stderr.
+`--install-browser-deps`, `--allow-loopback` (testing only). Unknown arguments
+are ignored, and help/errors are written to stderr.
 
 Example:
 

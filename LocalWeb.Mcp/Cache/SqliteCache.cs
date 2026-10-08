@@ -17,6 +17,7 @@ public sealed class SqliteCache : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _disposed;
 
+    /// <summary>Initializes the cache and purges expired entries.</summary>
     public SqliteCache(IOptions<LocalWebOptions> options, ILogger<SqliteCache> logger)
     {
         _logger = logger;
@@ -43,6 +44,9 @@ public sealed class SqliteCache : IAsyncDisposable
         Initialize();
     }
 
+    /// <summary>Returns a non-expired value, or <see langword="null"/>.</summary>
+    /// <param name="key">Cache key.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
     public async Task<string?> GetAsync(string key, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -67,6 +71,11 @@ public sealed class SqliteCache : IAsyncDisposable
         }
     }
 
+    /// <summary>Stores a value under a key with a time-to-live.</summary>
+    /// <param name="key">Cache key.</param>
+    /// <param name="value">Value to store.</param>
+    /// <param name="ttl">Time-to-live.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
     public async Task SetAsync(string key, string value, TimeSpan ttl, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -102,6 +111,9 @@ public sealed class SqliteCache : IAsyncDisposable
         }
     }
 
+    /// <summary>Removes a key if present.</summary>
+    /// <param name="key">Cache key.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
     public async Task RemoveAsync(string key, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -162,6 +174,7 @@ public sealed class SqliteCache : IAsyncDisposable
 
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+    /// <summary>Drains in-flight operations and clears the connection pool.</summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)

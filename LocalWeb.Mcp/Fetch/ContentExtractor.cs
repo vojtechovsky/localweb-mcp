@@ -18,6 +18,7 @@ public sealed partial class ContentExtractor
     private readonly ILogger<ContentExtractor> _logger;
     private readonly Converter _converter;
 
+    /// <summary>Initializes a new extractor.</summary>
     public ContentExtractor(IOptions<LocalWebOptions> options, ILogger<ContentExtractor> logger)
     {
         _options = options.Value;
@@ -32,6 +33,9 @@ public sealed partial class ContentExtractor
         _converter = new Converter(config);
     }
 
+    /// <summary>Extracts the main article from HTML and converts it to Markdown.</summary>
+    /// <param name="url">The page URL, used to resolve relative links/images.</param>
+    /// <param name="html">Raw HTML.</param>
     public ExtractedContent Extract(string url, string html)
     {
         var title = string.Empty;
@@ -56,6 +60,9 @@ public sealed partial class ContentExtractor
         return new ExtractedContent(title, markdown, markdown.Length);
     }
 
+    /// <summary>Normalizes a plain-text body (no HTML extraction).</summary>
+    /// <param name="title">Title to attach, if any.</param>
+    /// <param name="text">The plain-text body.</param>
     public ExtractedContent ExtractPlainText(string title, string text)
     {
         var normalized = NormalizeLineBreaks(text);

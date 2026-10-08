@@ -24,12 +24,16 @@ public sealed class SearxngClient : IDisposable
     private readonly ILogger<SearxngClient> _logger;
     private readonly HttpClient _http;
 
+    /// <summary>Initializes the client with a default transport.</summary>
     public SearxngClient(IOptions<LocalWebOptions> options, ILogger<SearxngClient> logger)
         : this(options, logger, new SocketsHttpHandler())
     {
     }
 
     /// <summary>Constructor used by tests to inject a fake transport.</summary>
+    /// <param name="options">Bound options.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="handler">The HTTP transport to use; the client takes ownership.</param>
     public SearxngClient(IOptions<LocalWebOptions> options, ILogger<SearxngClient> logger, HttpMessageHandler handler)
     {
         _options = options.Value;
@@ -43,6 +47,12 @@ public sealed class SearxngClient : IDisposable
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
     }
 
+    /// <summary>Runs a search against the local SearXNG instance.</summary>
+    /// <param name="query">Search query.</param>
+    /// <param name="maxResults">Maximum results to return.</param>
+    /// <param name="language">Language code, or "auto".</param>
+    /// <param name="page">1-based page number.</param>
+    /// <param name="cancellationToken">Caller cancellation token.</param>
     public async Task<SearchResponse> SearchAsync(
         string query,
         int maxResults,
@@ -185,6 +195,7 @@ public sealed class SearxngClient : IDisposable
         return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
+    /// <summary>Disposes the underlying HTTP client.</summary>
     public void Dispose()
     {
         _http.Dispose();

@@ -1,4 +1,5 @@
 using LocalWeb.Mcp.Cache;
+using LocalWeb.Mcp.Composition;
 using LocalWeb.Mcp.Fetch;
 using LocalWeb.Mcp.Security;
 using Microsoft.Extensions.DependencyInjection;
@@ -103,13 +104,7 @@ public sealed class LiveWebTests
 
         // Default options: only http/https on ports 80/443, no loopback.
         services.AddSingleton(TestOptions.Create());
-        services.AddSingleton<UrlGuard>();
-        services.AddSingleton<SqliteCache>();
-        services.AddSingleton<HttpFetcher>();
-        services.AddSingleton<PlaywrightFetcher>();
-        services.AddSingleton<ContentExtractor>();
-        services.AddSingleton<LinkExtractor>();
-        services.AddSingleton<PageFetcher>();
+        services.AddLocalWebServices();
 
         return services.BuildServiceProvider();
     }

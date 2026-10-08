@@ -17,6 +17,7 @@ public sealed class WebExtractLinksAction
     private readonly LinkExtractor _extractor;
     private readonly ILogger<WebExtractLinksAction> _logger;
 
+    /// <summary>Initializes the action.</summary>
     public WebExtractLinksAction(
         PageFetcher fetcher,
         LinkExtractor extractor,
@@ -27,6 +28,7 @@ public sealed class WebExtractLinksAction
         _logger = logger;
     }
 
+    /// <summary>Link-extraction handler exposed as the <c>web_extract_links</c> MCP tool.</summary>
     [McpServerTool(Name = "web_extract_links", Title = "Extract links", ReadOnly = true, OpenWorld = true)]
     [Description("Fetch a URL and return the http(s) links found on the page as Markdown. Uses HTTP first, with a browser fallback.")]
     public async Task<string> WebExtractLinksAsync(

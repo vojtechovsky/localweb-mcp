@@ -9,6 +9,9 @@ namespace LocalWeb.Mcp.Options;
 /// </summary>
 public static class CommandLineUtilities
 {
+    /// <summary>Parses the command-line arguments, ignoring unknown flags and writing help to stderr.</summary>
+    /// <param name="args">Raw process arguments.</param>
+    /// <returns>The parsed options, or defaults when parsing fails.</returns>
     public static CommandLineOptions Parse(string[] args)
     {
         var parser = new Parser(settings =>

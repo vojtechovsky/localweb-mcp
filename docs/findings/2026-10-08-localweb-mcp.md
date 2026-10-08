@@ -5,12 +5,13 @@
 
 - **Protocol:** pipeline-code-review (adapted for localweb-mcp).
 - **Round log:** `docs/review-sessions/2026-10-08-localweb-mcp-rounds.md`.
-- **Rounds run:** `1`.
+- **Rounds run:** `2`.
 - **Baseline commit:** `c139baca3890be807b9e9d53c4006cf6853f6de5`.
-- **Build / tests at close:** `dotnet build LocalWeb.Mcp.slnx` → pass (0 warnings);
-  `dotnet test` → 76 passed / 8 skipped; `LOCALWEB_INTEGRATION=1 dotnet test` → 84 passed.
-- **Outcome:** 2 H1 (1 fixed, 1 documented residual), 13 H2 fixed, 6 H3 fixed,
-  4 H4 fixed; 9 items left open (below).
+- **Build / tests at close:** `dotnet build LocalWeb.Mcp.slnx` → pass (0 warnings,
+  XML docs enforced via `GenerateDocumentationFile`);
+  `dotnet test` → 77 passed / 7 skipped; `LOCALWEB_INTEGRATION=1 dotnet test` → 84 passed.
+- **Outcome:** all H1–H3 fixed or explicitly documented as residual; H4 addressed
+  except the residual browser DNS-rebinding note.
 
 ## Consolidation
 
@@ -138,19 +139,38 @@ resilience) were independently reported by 2–3 agents each.
 - `IntegrationTests` docs no longer claim a SearXNG dependency.
 - `WebExtractLinksAction.ExtractLinksAsync` renamed to `WebExtractLinksAsync`.
 
-## Open (not fixed in this round)
+## Round 2 (2026-10-08)
+
+Second pass targeted the items left open after round 1.
+
+- **O1 (H1) browser redirect** — now **mitigated**: before the browser runs,
+  `HttpFetcher.ResolveRedirectsAsync` follows redirects with validated, IP-pinned
+  HEAD requests and the browser is pointed at the already-validated final URL.
+  Residual (documented): a redirect hop still fires server-side before the final
+  URL check; full elimination needs an egress proxy.
+- **O3 (H3) rendered HTML size cap** — `page.ContentAsync()` output is capped at
+  `MaxResponseBytes` with a warning.
+- **O4 (H3) test-only loopback flag** — configuration/env can no longer enable it;
+  only the explicit `--allow-loopback` CLI flag does (`PostConfigure`).
+- **O5 (H4) concurrency test** — replaced the tautological assertion with one that
+  measures the server-side peak concurrency of slow requests and asserts the page
+  limit; the test now fails if the semaphore is removed.
+- **O6 (H4) loopback test gating** — moved to a plain `[Fact]` that runs without a
+  browser or internet.
+- **O7 (H4) XML documentation** — `GenerateDocumentationFile` enabled; every public
+  member documented; build is warning-free.
+- **O8 (H4) composition root** — a single `AddLocalWebServices()` extension is used
+  by the host and both test fixtures, removing the duplicated DI graph.
+- **O9 (H4) search cache key** — the key no longer includes `maxResults`; the full
+  result set is cached and sliced per call.
+
+## Open
 
 | id | severity | location | topic |
 |----|----------|----------|-------|
-| O1 | H1 (residual) | `PlaywrightFetcher.cs` | Browser redirect hop fires before the final-URL check; full mitigation needs an egress proxy. |
-| O2 | H2 (residual) | `PlaywrightFetcher.cs` | Browser cannot pin the validated IP (Chromium re-resolves DNS). Documented; residual rebinding risk. |
-| O3 | H3 | `PlaywrightFetcher.cs` | `page.ContentAsync()` (rendered HTML) has no size cap equivalent to `MaxResponseBytes`. |
-| O4 | H3 | `Options/LocalWebOptions.cs` | `AllowLoopbackForTests` is production-bindable; now logs a startup warning but is not test-only-gated. |
-| O5 | H4 | `Tests/IntegrationTests.cs` | `Concurrent_renders_respect_the_page_limit` does not actually assert the cap. |
-| O6 | H4 | `Tests/IntegrationTests.cs` | The loopback rejection test is gated behind `LOCALWEB_INTEGRATION` although it needs no browser. |
-| O7 | H4 | solution-wide | XML docs missing on several public members; no `GenerateDocumentationFile`. |
-| O8 | H4 | `Program.cs`, tests | No interfaces/composition root; `PageFetcher` pipeline untestable without network; DI graph duplicated in tests. |
-| O9 | H4 | `Cache`, `WebSearchAction` | Search cache key includes `maxResults`; `RemoveAsync` has no production caller. |
+| O2 | H2 (residual) | `PlaywrightFetcher.cs` | The browser cannot pin the validated IP (Chromium re-resolves DNS); a DNS-rebinding answer could still reach an internal address. Documented in the README; full mitigation needs an egress proxy. |
+
+Everything else from round 1 is fixed; see the registry in the round log.
 
 ## Notable positives (unchanged)
 

@@ -12,6 +12,9 @@ namespace LocalWeb.Mcp.Actions;
 /// </summary>
 public static class OutputFormatter
 {
+    /// <summary>Formats search results as Markdown.</summary>
+    /// <param name="query">The original query.</param>
+    /// <param name="response">The SearXNG response.</param>
     public static string FormatSearch(string query, SearchResponse response)
     {
         if (response.Results.Count == 0)
@@ -57,6 +60,8 @@ public static class OutputFormatter
         return builder.ToString().TrimEnd() + Environment.NewLine;
     }
 
+    /// <summary>Formats a fetched page as Markdown.</summary>
+    /// <param name="outcome">The fetch outcome.</param>
     public static string FormatFetch(FetchOutcome outcome)
     {
         var builder = new StringBuilder();
@@ -74,6 +79,11 @@ public static class OutputFormatter
         return builder.ToString().TrimEnd() + Environment.NewLine;
     }
 
+    /// <summary>Formats extracted links as Markdown.</summary>
+    /// <param name="title">Page title, if any.</param>
+    /// <param name="url">The page URL.</param>
+    /// <param name="source">Where the HTML came from.</param>
+    /// <param name="links">The extracted links.</param>
     public static string FormatLinks(string title, string url, FetchSource source, IReadOnlyList<LinkItem> links)
     {
         var builder = new StringBuilder();

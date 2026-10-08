@@ -8,7 +8,8 @@
 - **Baseline commit:** `c139baca3890be807b9e9d53c4006cf6853f6de5`.
 - **Build baseline:** `dotnet build LocalWeb.Mcp.slnx` → pass (0 warnings, 0 errors).
 - **Tests baseline:** `dotnet test` → 63 passed, 8 skipped.
-- **Build / tests at close:** build pass; `dotnet test` → 76 passed / 8 skipped;
+- **Build / tests at close:** build pass (0 warnings, XML docs enforced);
+  `dotnet test` → 77 passed / 7 skipped;
   `LOCALWEB_INTEGRATION=1 dotnet test` → 84 passed.
 - **Findings document:** `docs/findings/2026-10-08-localweb-mcp.md`.
 
@@ -42,15 +43,15 @@
 | F24 | `appsettings.json`/`Program.cs` | `Logging` section dead | H4 | R1 | fixed |
 | F25 | `Tests/IntegrationTests.cs` | docs claim SearXNG dependency | H4 | R1 | fixed |
 | F26 | `Actions/WebExtractLinksAction.cs` | method naming inconsistency | H4 | R1 | fixed |
-| O1 | `Fetch/PlaywrightFetcher.cs` | browser redirect hop fires first | H1 | R1 | open |
-| O2 | `Fetch/PlaywrightFetcher.cs` | browser cannot pin validated IP | H2 | R1 | open |
-| O3 | `Fetch/PlaywrightFetcher.cs` | rendered HTML has no size cap | H3 | R1 | open |
-| O4 | `Options/LocalWebOptions.cs` | `AllowLoopbackForTests` production-bindable | H3 | R1 | open |
-| O5 | `Tests/IntegrationTests.cs` | concurrency test tautological | H4 | R1 | open |
-| O6 | `Tests/IntegrationTests.cs` | loopback test gated needlessly | H4 | R1 | open |
-| O7 | solution-wide | XML docs incomplete on public members | H4 | R1 | open |
-| O8 | `Program.cs`, tests | no interfaces / composition root | H4 | R1 | open |
-| O9 | `Cache`, `WebSearchAction` | search key includes `maxResults`; `RemoveAsync` dead | H4 | R1 | open |
+| O1 | `Fetch/PlaywrightFetcher.cs` | browser redirect hop fires first | H1 | R2 | mitigated |
+| O2 | `Fetch/PlaywrightFetcher.cs` | browser cannot pin validated IP | H2 | R2 | wontfix (documented) |
+| O3 | `Fetch/PlaywrightFetcher.cs` | rendered HTML has no size cap | H3 | R2 | fixed |
+| O4 | `Options/LocalWebOptions.cs` | `AllowLoopbackForTests` production-bindable | H3 | R2 | fixed |
+| O5 | `Tests/IntegrationTests.cs` | concurrency test tautological | H4 | R2 | fixed |
+| O6 | `Tests/IntegrationTests.cs` | loopback test gated needlessly | H4 | R2 | fixed |
+| O7 | solution-wide | XML docs incomplete on public members | H4 | R2 | fixed |
+| O8 | `Program.cs`, tests | no interfaces / composition root | H4 | R2 | fixed |
+| O9 | `Cache`, `WebSearchAction` | search key includes `maxResults`; `RemoveAsync` dead | H4 | R2 | fixed |
 
 ## Round log
 
@@ -65,6 +66,21 @@
   changes additionally verified with `LOCALWEB_INTEGRATION=1 dotnet test`.
 - New topics: 35 (26 fixed, 9 open).
 - Regressions: 0.
+
+### Round 2 — 2026-10-08
+
+- Roles: same five (R1, R2, R4, R5, R8); targeted at the 9 carry-over items.
+- Confirmed: 8 fixed (O1 mitigated, O3–O9 fixed); 1 documented residual (O2).
+- Fixes applied: `ResolveRedirectsAsync` + browser pre-resolution (O1); rendered
+  HTML cap (O3); `--allow-loopback` only (O4); real concurrency assertion (O5);
+  ungated loopback test (O6); `GenerateDocumentationFile` + full XML docs (O7);
+  `AddLocalWebServices` composition root (O8); search cache key without
+  `maxResults` (O9). Verified by `dotnet build LocalWeb.Mcp.slnx` and
+  `dotnet test` (77 pass / 7 skip; `LOCALWEB_INTEGRATION=1` → 84 pass).
+- New topics: 0 (all were carry-over).
+- Regressions: 0.
+- Stop gate: **no new H1/H2/H3 topics** and every remaining item is either fixed or
+  a documented residual (O2). The loop is complete for this scope.
 
 ## Confirmed domain facts (challengeable — feed `{KNOWN_FACTS}` next round)
 

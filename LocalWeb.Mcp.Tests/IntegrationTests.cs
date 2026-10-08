@@ -1,4 +1,4 @@
-using LocalWeb.Mcp.Cache;
+using LocalWeb.Mcp.Composition;
 using LocalWeb.Mcp.Fetch;
 using LocalWeb.Mcp.Security;
 using Microsoft.AspNetCore.Builder;
@@ -10,9 +10,9 @@ using Microsoft.Extensions.Logging;
 namespace LocalWeb.Mcp.Tests;
 
 /// <summary>
-/// End-to-end tests for the fetch pipeline. They start a local Kestrel server
-/// and need an installed Playwright Chromium, so they are skipped unless
-/// <c>LOCALWEB_INTEGRATION=1</c> is set.
+/// End-to-end tests for the fetch pipeline. They start a local Kestrel server;
+/// the browser-backed ones also need an installed Playwright Chromium and are
+/// skipped unless <c>LOCALWEB_INTEGRATION=1</c> is set.
 /// </summary>
 public sealed class IntegrationTests
 {
@@ -55,11 +55,10 @@ public sealed class IntegrationTests
         Assert.Contains("Rendered App", outcome.Markdown);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task WebRender_rejects_loopback_when_test_flag_is_off()
     {
-        Skip.IfNot(IntegrationEnabled, SkipReason);
-
+        // Needs neither a browser nor internet: UrlGuard rejects before any render.
         await using var server = await TestWebServer.StartAsync();
         await using var provider = BuildProvider(server.BaseUri, allowLoopback: false);
         var fetcher = provider.GetRequiredService<PageFetcher>();
@@ -69,7 +68,7 @@ public sealed class IntegrationTests
     }
 
     [SkippableFact]
-    public async Task Concurrent_renders_respect_the_page_limit()
+    public async Task Browser_page_limit_is_enforced()
     {
         Skip.IfNot(IntegrationEnabled, SkipReason);
 
@@ -79,11 +78,12 @@ public sealed class IntegrationTests
 
         var tasks = Enumerable.Range(0, 3)
             .Select(_ => fetcher.FetchAsync(
-                new Uri(server.BaseUri, "spa"), forceBrowser: true, bypassCache: true, CancellationToken.None));
+                new Uri(server.BaseUri, "slow"), forceBrowser: true, bypassCache: true, CancellationToken.None));
 
-        var results = await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks);
 
-        Assert.All(results, r => Assert.Equal(FetchSource.Browser, r.Source));
+        // With a page limit of 1 the server must never see two slow GETs at once.
+        Assert.Equal(1, server.MaxConcurrentSlowRequests);
     }
 
     private static ServiceProvider BuildProvider(
@@ -101,29 +101,30 @@ public sealed class IntegrationTests
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Warning));
         services.AddSingleton(options);
-        services.AddSingleton<UrlGuard>();
-        services.AddSingleton<SqliteCache>();
-        services.AddSingleton<HttpFetcher>();
-        services.AddSingleton<PlaywrightFetcher>();
-        services.AddSingleton<ContentExtractor>();
-        services.AddSingleton<PageFetcher>();
+        services.AddLocalWebServices();
         return services.BuildServiceProvider();
     }
 
     private sealed class TestWebServer : IAsyncDisposable
     {
         private readonly WebApplication _app;
+        private readonly ConcurrencyCounter _slowCounter;
 
-        private TestWebServer(WebApplication app, Uri baseUri)
+        private TestWebServer(WebApplication app, Uri baseUri, ConcurrencyCounter slowCounter)
         {
             _app = app;
             BaseUri = baseUri;
+            _slowCounter = slowCounter;
         }
 
         public Uri BaseUri { get; }
 
+        public int MaxConcurrentSlowRequests => _slowCounter.Max;
+
         public static async Task<TestWebServer> StartAsync()
         {
+            var slowCounter = new ConcurrencyCounter();
+
             var builder = WebApplication.CreateSlimBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -131,10 +132,31 @@ public sealed class IntegrationTests
 
             app.MapGet("/", () => Results.Content(StaticHtml(), "text/html; charset=utf-8"));
             app.MapGet("/spa", () => Results.Content(SpaHtml(), "text/html; charset=utf-8"));
+            app.MapGet("/slow", async (HttpContext context) =>
+            {
+                var isGet = HttpMethods.IsGet(context.Request.Method);
+                if (isGet)
+                {
+                    slowCounter.Enter();
+                }
+
+                try
+                {
+                    await Task.Delay(400);
+                    return Results.Content(SpaHtml(), "text/html; charset=utf-8");
+                }
+                finally
+                {
+                    if (isGet)
+                    {
+                        slowCounter.Exit();
+                    }
+                }
+            });
 
             await app.StartAsync();
             var address = app.Urls.First();
-            return new TestWebServer(app, new Uri(address));
+            return new TestWebServer(app, new Uri(address), slowCounter);
         }
 
         public async ValueTask DisposeAsync() => await _app.DisposeAsync();
@@ -160,5 +182,25 @@ public sealed class IntegrationTests
             </script>
             </body></html>
             """;
+    }
+
+    private sealed class ConcurrencyCounter
+    {
+        private int _current;
+        private int _max;
+
+        public int Max => Volatile.Read(ref _max);
+
+        public void Enter()
+        {
+            var current = Interlocked.Increment(ref _current);
+            int observed;
+            while (current > (observed = Volatile.Read(ref _max)))
+            {
+                Interlocked.CompareExchange(ref _max, current, observed);
+            }
+        }
+
+        public void Exit() => Interlocked.Decrement(ref _current);
     }
 }

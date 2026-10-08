@@ -27,6 +27,7 @@ public sealed class UrlGuard
 {
     private readonly LocalWebOptions _options;
 
+    /// <summary>Initializes the guard.</summary>
     public UrlGuard(IOptions<LocalWebOptions> options)
     {
         _options = options.Value;

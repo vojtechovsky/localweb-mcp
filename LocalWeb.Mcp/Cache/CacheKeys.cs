@@ -9,17 +9,23 @@ namespace LocalWeb.Mcp.Cache;
 /// </summary>
 public static class CacheKeys
 {
-    public static string Search(string query, string language, int page, int maxResults)
+    /// <summary>Cache key for a search, independent of the requested result count.</summary>
+    /// <param name="query">Raw query; normalized (trimmed, lower-cased).</param>
+    /// <param name="language">Language code, or "auto".</param>
+    /// <param name="page">1-based page number.</param>
+    public static string Search(string query, string language, int page)
     {
         var normalized = string.Join('\u001f',
             query.Trim().ToLowerInvariant(),
             (language ?? "auto").Trim().ToLowerInvariant(),
-            page.ToString(),
-            maxResults.ToString());
+            page.ToString());
 
         return "search:" + Sha256(normalized);
     }
 
+    /// <summary>Cache key for a fetched page, scoped by mode (e.g. auto, browser, html).</summary>
+    /// <param name="url">Page URL.</param>
+    /// <param name="mode">Fetch mode discriminator.</param>
     public static string Fetch(string url, string mode)
     {
         var normalized = string.Join('\u001f', NormalizeUrl(url), mode);
