@@ -11,7 +11,7 @@ public sealed class LocalWebOptions
     /// <summary>Base URL of the local SearXNG instance (no trailing slash required).</summary>
     public string SearxngUrl { get; set; } = "http://127.0.0.1:8080";
 
-    /// <summary>Path to the SQLite cache file. Relative paths are resolved against the working directory.</summary>
+    /// <summary>Path to the SQLite cache file. Relative paths are resolved against the application base directory (<c>AppContext.BaseDirectory</c>).</summary>
     public string CachePath { get; set; } = "cache.db";
 
     /// <summary>Time-to-live for successful search results.</summary>

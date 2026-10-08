@@ -91,6 +91,12 @@ public sealed class UrlGuardTests
     [InlineData("fc00::1", true)]
     [InlineData("fe80::1", true)]
     [InlineData("::ffff:10.0.0.1", true)]
+    // IPv6 transition/translation forms that embed an IPv4 address.
+    [InlineData("64:ff9b::a00:1", true)]
+    [InlineData("64:ff9b::7f00:1", true)]
+    [InlineData("2002:0a00:0001::", true)]
+    [InlineData("::10.0.0.1", true)]
+    [InlineData("2001:0000:4136:e378:8000:63bf:3fff:fdd2", true)]
     [InlineData("2606:4700:4700::1111", false)]
     public void IsBlocked_classifies_addresses(string address, bool expected)
     {

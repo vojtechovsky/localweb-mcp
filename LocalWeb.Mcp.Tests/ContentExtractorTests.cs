@@ -49,13 +49,24 @@ public sealed class ContentExtractorTests
     }
 
     [Fact]
-    public void NeedsBrowser_is_true_when_page_asks_for_javascript()
+    public void NeedsBrowser_is_true_when_visible_text_asks_for_javascript()
     {
-        var html = ArticleHtml() + "<noscript>You need to enable JavaScript to run this app.</noscript>";
+        var html = ArticleHtml().Replace("</body>", "<p>You need to enable JavaScript to run this app.</p></body>");
         var extractor = Create();
 
         var result = extractor.Extract("https://example.com/app", html);
 
         Assert.True(extractor.NeedsBrowser(html, result));
+    }
+
+    [Fact]
+    public void NeedsBrowser_ignores_javascript_phrase_only_in_noscript()
+    {
+        var html = ArticleHtml().Replace("</body>", "<noscript>You need to enable JavaScript to run this app.</noscript></body>");
+        var extractor = Create();
+
+        var result = extractor.Extract("https://example.com/app", html);
+
+        Assert.False(extractor.NeedsBrowser(html, result));
     }
 }

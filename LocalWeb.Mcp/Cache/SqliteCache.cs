@@ -45,6 +45,8 @@ public sealed class SqliteCache : IAsyncDisposable
 
     public async Task<string?> GetAsync(string key, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -67,6 +69,8 @@ public sealed class SqliteCache : IAsyncDisposable
 
     public async Task SetAsync(string key, string value, TimeSpan ttl, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -100,6 +104,8 @@ public sealed class SqliteCache : IAsyncDisposable
 
     public async Task RemoveAsync(string key, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -164,15 +170,19 @@ public sealed class SqliteCache : IAsyncDisposable
         }
 
         _disposed = true;
+
+        // Drain in-flight operations (they hold the gate) before clearing pools.
+        // The semaphore is intentionally not disposed: a caller that already
+        // passed the _disposed check may still be waiting on it, and disposing it
+        // would throw instead of letting that call finish during shutdown.
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            _gate.Release();
+            SqliteConnection.ClearAllPools();
         }
         finally
         {
-            _gate.Dispose();
-            SqliteConnection.ClearAllPools();
+            _gate.Release();
         }
     }
 }

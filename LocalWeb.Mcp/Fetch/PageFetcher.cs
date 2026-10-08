@@ -8,12 +8,15 @@ using Microsoft.Extensions.Options;
 namespace LocalWeb.Mcp.Fetch;
 
 /// <summary>
-/// Orchestrates the fetch pipeline shared by the <c>web_fetch</c> and
-/// <c>web_render</c> tools: validate, consult the cache, try HTTP, fall back to
-/// the browser, then cache the result.
+/// Orchestrates the fetch pipeline shared by <c>web_fetch</c>, <c>web_render</c>
+/// and <c>web_extract_links</c>: validate, consult the cache, try HTTP, fall back
+/// to the browser, then cache the result. A corrupt cache entry is treated as a
+/// miss, and a failed cache write never masks the real result.
 /// </summary>
 public sealed class PageFetcher
 {
+    private const string PlainTextMediaType = "text/plain";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -62,7 +65,7 @@ public sealed class PageFetcher
             var cached = await _cache.GetAsync(cacheKey, cancellationToken).ConfigureAwait(false);
             if (cached is not null)
             {
-                var entry = JsonSerializer.Deserialize<CachedFetch>(cached, JsonOptions);
+                var entry = TryReadCache<CachedFetch>(cached);
                 if (entry is { IsError: true })
                 {
                     throw new LocalWebException(entry.Error ?? "Cached error.");
@@ -81,23 +84,15 @@ public sealed class PageFetcher
                 ? await FetchWithBrowserAsync(url, cancellationToken).ConfigureAwait(false)
                 : await FetchAutoAsync(url, cancellationToken).ConfigureAwait(false);
 
-            await _cache.SetAsync(
-                    cacheKey,
-                    JsonSerializer.Serialize(new CachedFetch(false, null, outcome), JsonOptions),
-                    TimeSpan.FromMinutes(_options.FetchTtlMinutes),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            await TryCacheAsync(cacheKey, new CachedFetch(false, null, outcome),
+                TimeSpan.FromMinutes(_options.FetchTtlMinutes), cancellationToken).ConfigureAwait(false);
 
             return outcome;
         }
         catch (LocalWebException ex)
         {
-            await _cache.SetAsync(
-                    cacheKey,
-                    JsonSerializer.Serialize(new CachedFetch(true, ex.Message, null), JsonOptions),
-                    TimeSpan.FromMinutes(_options.ErrorTtlMinutes),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
+            await TryCacheAsync(cacheKey, new CachedFetch(true, ex.Message, null),
+                TimeSpan.FromMinutes(_options.ErrorTtlMinutes), CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -117,7 +112,7 @@ public sealed class PageFetcher
             var cached = await _cache.GetAsync(cacheKey, cancellationToken).ConfigureAwait(false);
             if (cached is not null)
             {
-                var entry = JsonSerializer.Deserialize<CachedRaw>(cached, JsonOptions);
+                var entry = TryReadCache<CachedRaw>(cached);
                 if (entry is { IsError: true })
                 {
                     throw new LocalWebException(entry.Error ?? "Cached error.");
@@ -134,23 +129,15 @@ public sealed class PageFetcher
         {
             var page = await FetchRawInternalAsync(url, cancellationToken).ConfigureAwait(false);
 
-            await _cache.SetAsync(
-                    cacheKey,
-                    JsonSerializer.Serialize(new CachedRaw(false, null, page), JsonOptions),
-                    TimeSpan.FromMinutes(_options.FetchTtlMinutes),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            await TryCacheAsync(cacheKey, new CachedRaw(false, null, page),
+                TimeSpan.FromMinutes(_options.FetchTtlMinutes), cancellationToken).ConfigureAwait(false);
 
             return page;
         }
         catch (LocalWebException ex)
         {
-            await _cache.SetAsync(
-                    cacheKey,
-                    JsonSerializer.Serialize(new CachedRaw(true, ex.Message, null), JsonOptions),
-                    TimeSpan.FromMinutes(_options.ErrorTtlMinutes),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
+            await TryCacheAsync(cacheKey, new CachedRaw(true, ex.Message, null),
+                TimeSpan.FromMinutes(_options.ErrorTtlMinutes), CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -160,16 +147,29 @@ public sealed class PageFetcher
         var response = await _http.FetchAsync(url, cancellationToken).ConfigureAwait(false);
         var finalUrl = response.FinalUri.ToString();
 
-        if (response.ContentType == "text/plain")
+        if (response.Truncated)
         {
+            _logger.LogWarning("The response from {Url} exceeded MaxResponseBytes and was truncated.", url);
+        }
+
+        if (response.ContentType == PlainTextMediaType)
+        {
+            // Plain text is already usable; never invoke the browser for it.
             return new RawPage(string.Empty, finalUrl, response.Body, FetchSource.Http);
         }
 
         var extracted = _extractor.Extract(finalUrl, response.Body);
-        if (extracted.TextLength == 0 || _extractor.NeedsBrowser(response.Body, extracted))
+        if (_extractor.NeedsBrowser(response.Body, extracted))
         {
             _logger.LogDebug("HTTP fetch of {Url} was not sufficient; rendering in the browser.", url);
-            return await RenderRawAsync(response.FinalUri, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await RenderRawAsync(response.FinalUri, cancellationToken).ConfigureAwait(false);
+            }
+            catch (LocalWebException ex)
+            {
+                _logger.LogWarning(ex, "Browser render failed for {Url}; returning the HTTP HTML.", url);
+            }
         }
 
         return new RawPage(extracted.Title, finalUrl, response.Body, FetchSource.Http);
@@ -187,21 +187,28 @@ public sealed class PageFetcher
         var response = await _http.FetchAsync(url, cancellationToken).ConfigureAwait(false);
         var finalUrl = response.FinalUri.ToString();
 
-        var extracted = response.ContentType == "text/plain"
-            ? _extractor.ExtractPlainText(string.Empty, response.Body)
-            : _extractor.Extract(finalUrl, response.Body);
-
-        if (extracted.TextLength == 0 || _extractor.NeedsBrowser(response.Body, extracted))
+        if (response.ContentType == PlainTextMediaType)
         {
-            _logger.LogDebug("HTTP fetch of {Url} was not sufficient; falling back to browser.", url);
-            return await FetchWithBrowserAsync(response.FinalUri, cancellationToken).ConfigureAwait(false);
+            var text = _extractor.ExtractPlainText(string.Empty, response.Body);
+            return new FetchOutcome(string.Empty, finalUrl, FetchSource.Http, Truncate(text.Markdown, response.Truncated));
         }
 
-        return new FetchOutcome(
-            extracted.Title,
-            finalUrl,
-            FetchSource.Http,
-            Truncate(extracted.Markdown));
+        var extracted = _extractor.Extract(finalUrl, response.Body);
+        if (_extractor.NeedsBrowser(response.Body, extracted))
+        {
+            _logger.LogDebug("HTTP fetch of {Url} was not sufficient; falling back to browser.", url);
+            try
+            {
+                return await FetchWithBrowserAsync(response.FinalUri, cancellationToken).ConfigureAwait(false);
+            }
+            catch (LocalWebException ex)
+            {
+                // Keep the usable (if partial) HTTP result rather than failing.
+                _logger.LogWarning(ex, "Browser fallback failed for {Url}; returning the HTTP result.", url);
+            }
+        }
+
+        return new FetchOutcome(extracted.Title, finalUrl, FetchSource.Http, Truncate(extracted.Markdown, response.Truncated));
     }
 
     private async Task<FetchOutcome> FetchWithBrowserAsync(Uri url, CancellationToken cancellationToken)
@@ -214,21 +221,51 @@ public sealed class PageFetcher
             throw new LocalWebException($"The browser could not extract any readable content from {url}.");
         }
 
-        return new FetchOutcome(
-            extracted.Title,
-            page.FinalUrl,
-            FetchSource.Browser,
-            Truncate(extracted.Markdown));
+        return new FetchOutcome(extracted.Title, page.FinalUrl, FetchSource.Browser, Truncate(extracted.Markdown));
     }
 
-    private string Truncate(string markdown)
+    private T? TryReadCache<T>(string value)
     {
-        if (markdown.Length <= _options.MaxOutputChars)
+        try
         {
-            return markdown;
+            return JsonSerializer.Deserialize<T>(value, JsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            // A corrupt or legacy cache row must not fail the tool; treat it as a miss.
+            _logger.LogWarning(ex, "Ignoring a corrupt cache entry.");
+            return default;
+        }
+    }
+
+    private async Task TryCacheAsync<T>(string key, T entry, TimeSpan ttl, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _cache.SetAsync(key, JsonSerializer.Serialize(entry, JsonOptions), ttl, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A cache write failure must never mask the real result.
+            _logger.LogWarning(ex, "Failed to write a cache entry.");
+        }
+    }
+
+    private string Truncate(string markdown, bool sourceTruncated = false)
+    {
+        var result = markdown;
+        if (result.Length > _options.MaxOutputChars)
+        {
+            result = result[.._options.MaxOutputChars] + "\n\n[content truncated]";
         }
 
-        return markdown[.._options.MaxOutputChars] + "\n\n[content truncated]";
+        if (sourceTruncated)
+        {
+            result += "\n\n[source truncated at MaxResponseBytes]";
+        }
+
+        return result;
     }
 
     private sealed record CachedFetch(bool IsError, string? Error, FetchOutcome? Outcome);

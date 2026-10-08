@@ -45,7 +45,7 @@ public sealed class OutputFormatterTests
         var text = OutputFormatter.FormatFetch(outcome);
 
         Assert.Contains("# My Title", text);
-        Assert.Contains("URL: https://example.com/a", text);
+        Assert.Contains("URL: <https://example.com/a>", text);
         Assert.Contains("Source: browser", text);
         Assert.Contains("body text", text);
     }
@@ -64,10 +64,46 @@ public sealed class OutputFormatterTests
         Assert.Contains("# Page", text);
         Assert.Contains("Source: cache", text);
         Assert.Contains("Links: 2", text);
-        Assert.Contains("[Docs \\[v2\\]](https://example.com/docs)", text);
-        Assert.Contains("[https://example.com/bare](https://example.com/bare)", text);
+        Assert.Contains("[Docs \\[v2\\]](<https://example.com/docs>)", text);
+        Assert.Contains("[<https://example.com/bare>](<https://example.com/bare>)", text);
 
         var empty = OutputFormatter.FormatLinks(string.Empty, "https://example.com/", FetchSource.Http, []);
         Assert.Contains("No http(s) links found.", empty);
+    }
+
+    [Fact]
+    public void Output_escapes_untrusted_content()
+    {
+        var links = new List<LinkItem>
+        {
+            new("click **here** <img>", "https://evil.example/x"),
+            new("brace", "https://evil.example/a> b\n[click](https://phish.example)"),
+        };
+
+        var linksText = OutputFormatter.FormatLinks("Page", "https://example.com/", FetchSource.Http, links);
+
+        // Anchor text cannot inject bold/HTML.
+        Assert.Contains("click \\*\\*here\\*\\* &lt;img&gt;", linksText);
+        // Destinations are wrapped so ')' cannot break out...
+        Assert.Contains("](<https://evil.example/x>)", linksText);
+        // ...and '>' / whitespace / newlines are neutralized.
+        Assert.Contains("<https://evil.example/a%3E", linksText);
+        Assert.DoesNotContain("a> b", linksText);
+        Assert.DoesNotContain("]\n", linksText);
+
+        var response = new SearchResponse
+        {
+            Results =
+            [
+                new SearchResult { Title = "Evil](https://phish.example)", Url = "https://evil.example/", Content = "a\n# heading" },
+            ],
+        };
+
+        var searchText = OutputFormatter.FormatSearch("q", response);
+
+        // The ']' in the title is escaped, so it cannot forge a link.
+        Assert.Contains("**Evil\\](https://phish.example)**", searchText);
+        // Newlines are collapsed, so a snippet cannot start a heading.
+        Assert.DoesNotContain("\n# heading", searchText);
     }
 }

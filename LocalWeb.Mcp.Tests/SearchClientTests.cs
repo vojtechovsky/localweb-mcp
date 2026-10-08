@@ -90,6 +90,17 @@ public sealed class SearchClientTests
             () => client.SearchAsync("   ", 8, "auto", 1, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task SearchAsync_handles_null_collections()
+    {
+        var client = Create(HttpStatusCode.OK, """{"query":"q","results":null,"suggestions":null}""", out _);
+
+        var response = await client.SearchAsync("q", 8, "auto", 1, CancellationToken.None);
+
+        Assert.Empty(response.Results);
+        Assert.Empty(response.Suggestions);
+    }
+
     private sealed class FakeHandler(HttpStatusCode status, string body, List<Uri> requested) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(

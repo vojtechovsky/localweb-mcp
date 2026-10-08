@@ -29,6 +29,10 @@ public sealed class HttpFetcher : IDisposable
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
+            // DNS pinning in ConnectAsync only holds if we connect to the target
+            // ourselves; an HTTP proxy would send ConnectAsync the proxy address
+            // and let the proxy re-resolve the target. Disable proxies explicitly.
+            UseProxy = false,
             AutomaticDecompression = DecompressionMethods.All,
             ConnectTimeout = TimeSpan.FromSeconds(_options.HttpTimeoutSeconds),
             ConnectCallback = ConnectAsync,
@@ -44,21 +48,28 @@ public sealed class HttpFetcher : IDisposable
 
     public async Task<HttpFetchResponse> FetchAsync(Uri url, CancellationToken cancellationToken)
     {
+        // Bound the ENTIRE request (connect + headers + body). HttpClient.Timeout
+        // stops applying once headers are read with ResponseHeadersRead, so a
+        // server that stalls after the headers would otherwise hang forever.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.HttpTimeoutSeconds));
+        var token = timeoutCts.Token;
+
         var current = url;
         var redirects = 0;
 
         while (true)
         {
-            await _guard.ValidateAsync(current, cancellationToken).ConfigureAwait(false);
+            await _guard.ValidateAsync(current, token).ConfigureAwait(false);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, current);
             HttpResponseMessage response;
             try
             {
-                response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
                     .ConfigureAwait(false);
             }
-            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
                 throw new LocalWebException($"Request to {current} timed out after {_options.HttpTimeoutSeconds}s.", ex);
             }
@@ -79,7 +90,7 @@ public sealed class HttpFetcher : IDisposable
                     var location = response.Headers.Location;
                     var next = location.IsAbsoluteUri ? location : new Uri(current, location);
                     // Fail fast if the redirect target is not allowed.
-                    await _guard.ValidateAsync(next, cancellationToken).ConfigureAwait(false);
+                    await _guard.ValidateAsync(next, token).ConfigureAwait(false);
                     _logger.LogDebug("Following redirect {From} -> {To}.", current, next);
                     current = next;
                     redirects++;
@@ -98,9 +109,28 @@ public sealed class HttpFetcher : IDisposable
                         $"Unsupported content type '{mediaType}' for {current}. Only HTML and plain text are supported.");
                 }
 
-                var (body, truncated) = await ReadLimitedAsync(response, cancellationToken).ConfigureAwait(false);
+                var (body, truncated) = await ReadBodyAsync(response, current, token).ConfigureAwait(false);
                 return new HttpFetchResponse(current, mediaType, body, truncated);
             }
+        }
+    }
+
+    private async Task<(string Body, bool Truncated)> ReadBodyAsync(
+        HttpResponseMessage response,
+        Uri url,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ReadLimitedAsync(response, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new LocalWebException($"Reading the response from {url} timed out.", ex);
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException)
+        {
+            throw new LocalWebException($"The connection to {url} failed while reading the response.", ex);
         }
     }
 
@@ -155,7 +185,15 @@ public sealed class HttpFetcher : IDisposable
         }
 
         var encoding = ResolveEncoding(response.Content.Headers.ContentType?.CharSet);
-        return (encoding.GetString(buffer.ToArray()), truncated);
+        var body = encoding.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+
+        // Strip a UTF-8 BOM so it does not become a leading U+FEFF in the Markdown.
+        if (body.Length > 0 && body[0] == '\uFEFF')
+        {
+            body = body[1..];
+        }
+
+        return (body, truncated);
     }
 
     private static Encoding ResolveEncoding(string? charset)

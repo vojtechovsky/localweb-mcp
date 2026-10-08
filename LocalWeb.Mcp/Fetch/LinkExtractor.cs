@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
+using LocalWeb.Mcp.Cache;
 using Microsoft.Extensions.Logging;
 
 namespace LocalWeb.Mcp.Fetch;
@@ -38,7 +39,9 @@ public sealed class LinkExtractor
         }
 
         var baseUri = ResolveBaseUri(document, pageUrl);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Scheme/host are case-insensitive but the path and query are not, so
+        // normalize the former (NormalizeUrl) and compare case-sensitively.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var links = new List<LinkItem>();
 
         foreach (var anchor in document.QuerySelectorAll("a[href]"))
@@ -56,7 +59,7 @@ public sealed class LinkExtractor
             }
 
             var target = absolute.ToString();
-            if (!seen.Add(target))
+            if (!seen.Add(CacheKeys.NormalizeUrl(target)))
             {
                 continue;
             }

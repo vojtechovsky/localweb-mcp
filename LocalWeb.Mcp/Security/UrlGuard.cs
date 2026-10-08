@@ -73,8 +73,9 @@ public sealed class UrlGuard
         var blocked = addresses.Where(IsBlocked).ToArray();
         if (blocked.Length > 0)
         {
-            throw new UrlGuardException(
-                $"Host '{url.Host}' resolves to a blocked address ({blocked[0]}).");
+            // Do not echo the resolved address: it would turn the tool into an
+            // internal-DNS oracle for the caller.
+            throw new UrlGuardException($"Host '{url.Host}' resolves to a disallowed address.");
         }
 
         return addresses;
@@ -147,6 +148,17 @@ public sealed class UrlGuard
                 if (address.IsIPv6Multicast) return true;                     // ff00::/8
 
                 var v6 = address.GetAddressBytes();
+
+                // IPv4-compatible ::/96 (also covers :: and ::1) and the
+                // IPv4-mapped range are normalized above, but be explicit here.
+                if (IsAllZero(v6, 0, 12)) return true;                        // ::a.b.c.d and ::
+
+                // IPv6 transition/translation forms that embed an IPv4 address
+                // can reach internal IPv4 networks on NAT64/6to4/Teredo hosts.
+                if (v6[0] == 0x00 && v6[1] == 0x64 && v6[2] == 0xFF && v6[3] == 0x9B) return true; // NAT64 64:ff9b::/96 and 64:ff9b:1::/48
+                if (v6[0] == 0x20 && v6[1] == 0x02) return true;              // 6to4 2002::/16
+                if (v6[0] == 0x20 && v6[1] == 0x01 && v6[2] == 0x00 && v6[3] == 0x00) return true; // Teredo 2001::/32
+
                 if ((v6[0] & 0xFE) == 0xFC) return true;                      // fc00::/7 unique local
                 if (v6[0] == 0xFE && (v6[1] & 0xC0) == 0xC0) return true;     // fec0::/10 site local (deprecated)
                 return false;
@@ -170,6 +182,19 @@ public sealed class UrlGuard
         }
 
         return false;
+    }
+
+    private static bool IsAllZero(byte[] bytes, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            if (bytes[i] != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static async Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken cancellationToken)

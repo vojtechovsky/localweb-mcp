@@ -73,7 +73,11 @@ public sealed partial class ContentExtractor
             return true;
         }
 
-        return JavaScriptRequiredRegex().IsMatch(html);
+        // Scan visible markup only: scripts, styles, noscript fallbacks and
+        // comments routinely contain "enable JavaScript" phrases and would cause
+        // false positives.
+        var visible = NonVisibleRegex().Replace(html, " ");
+        return JavaScriptRequiredRegex().IsMatch(visible);
     }
 
     private string ToMarkdown(string html)
@@ -114,6 +118,9 @@ public sealed partial class ContentExtractor
 
     [GeneratedRegex("<(script|style)\\b[^>]*>.*?</\\1>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex ScriptAndStyleRegex();
+
+    [GeneratedRegex("<(script|style|noscript|template)\\b[^>]*>.*?</\\1>|<!--.*?-->", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex NonVisibleRegex();
 
     [GeneratedRegex("<[^>]+>")]
     private static partial Regex TagRegex();

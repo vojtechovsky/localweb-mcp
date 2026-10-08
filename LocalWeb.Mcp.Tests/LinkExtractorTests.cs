@@ -55,6 +55,16 @@ public sealed class LinkExtractorTests
     }
 
     [Fact]
+    public void Extract_keeps_urls_that_differ_only_by_path_case()
+    {
+        const string html = """<html><body><a href="/Docs">a</a><a href="/docs">b</a></body></html>""";
+
+        var links = Create().Extract(html, "https://example.com/", 50);
+
+        Assert.Equal(2, links.Count);
+    }
+
+    [Fact]
     public void Extract_returns_empty_for_empty_html()
     {
         Assert.Empty(Create().Extract(string.Empty, "https://example.com/", 50));

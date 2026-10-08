@@ -4,18 +4,23 @@ using LocalWeb.Mcp.Search;
 
 namespace LocalWeb.Mcp.Actions;
 
-/// <summary>Renders tool results as plain Markdown text for the MCP client.</summary>
+/// <summary>
+/// Renders tool results as plain Markdown text for the MCP client. All content
+/// that originates from the web (titles, snippets, engines, link text and URLs)
+/// is attacker-controlled, so it is escaped before being embedded to stop it
+/// from injecting Markdown structure or HTML into the model's context.
+/// </summary>
 public static class OutputFormatter
 {
     public static string FormatSearch(string query, SearchResponse response)
     {
         if (response.Results.Count == 0)
         {
-            return $"No results for \"{query}\".";
+            return $"No results for \"{EscapeInline(query)}\".";
         }
 
         var builder = new StringBuilder();
-        builder.Append("Results for \"").Append(query).Append("\": ").Append(response.Results.Count);
+        builder.Append("Results for \"").Append(EscapeInline(query)).Append("\": ").Append(response.Results.Count);
 
         if (response.NumberOfResults > response.Results.Count)
         {
@@ -27,17 +32,17 @@ public static class OutputFormatter
         for (var i = 0; i < response.Results.Count; i++)
         {
             var result = response.Results[i];
-            builder.Append(i + 1).Append(". **").Append(result.Title).AppendLine("**");
-            builder.Append("   ").AppendLine(result.Url);
+            builder.Append(i + 1).Append(". **").Append(EscapeInline(result.Title)).AppendLine("**");
+            builder.Append("   ").AppendLine(SanitizeUrl(result.Url));
 
             if (!string.IsNullOrWhiteSpace(result.Content))
             {
-                builder.Append("   ").AppendLine(result.Content.Trim());
+                builder.Append("   ").AppendLine(EscapeInline(result.Content));
             }
 
             if (!string.IsNullOrWhiteSpace(result.Engine))
             {
-                builder.Append("   _source: ").Append(result.Engine).AppendLine("_");
+                builder.Append("   _source: ").Append(EscapeInline(result.Engine)).AppendLine("_");
             }
 
             builder.AppendLine();
@@ -45,7 +50,8 @@ public static class OutputFormatter
 
         if (response.Suggestions.Count > 0)
         {
-            builder.Append("Suggestions: ").AppendLine(string.Join(", ", response.Suggestions));
+            builder.Append("Suggestions: ")
+                .AppendLine(string.Join(", ", response.Suggestions.Select(EscapeInline)));
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;
@@ -57,10 +63,10 @@ public static class OutputFormatter
 
         if (!string.IsNullOrWhiteSpace(outcome.Title))
         {
-            builder.Append("# ").AppendLine(outcome.Title.Trim());
+            builder.Append("# ").AppendLine(EscapeInline(outcome.Title));
         }
 
-        builder.Append("URL: ").AppendLine(outcome.Url);
+        builder.Append("URL: ").AppendLine(SanitizeUrl(outcome.Url));
         builder.Append("Source: ").AppendLine(outcome.Source.ToString().ToLowerInvariant());
         builder.AppendLine();
         builder.Append(outcome.Markdown);
@@ -68,18 +74,16 @@ public static class OutputFormatter
         return builder.ToString().TrimEnd() + Environment.NewLine;
     }
 
-    public static string FormatError(string message) => $"Error: {message}";
-
     public static string FormatLinks(string title, string url, FetchSource source, IReadOnlyList<LinkItem> links)
     {
         var builder = new StringBuilder();
 
         if (!string.IsNullOrWhiteSpace(title))
         {
-            builder.Append("# ").AppendLine(title.Trim());
+            builder.Append("# ").AppendLine(EscapeInline(title));
         }
 
-        builder.Append("URL: ").AppendLine(url);
+        builder.Append("URL: ").AppendLine(SanitizeUrl(url));
         builder.Append("Source: ").AppendLine(source.ToString().ToLowerInvariant());
         builder.Append("Links: ").AppendLine(links.Count.ToString());
         builder.AppendLine();
@@ -93,13 +97,57 @@ public static class OutputFormatter
         for (var i = 0; i < links.Count; i++)
         {
             var link = links[i];
-            var text = string.IsNullOrWhiteSpace(link.Text) ? link.Url : EscapeLinkText(link.Text);
-            builder.Append(i + 1).Append(". [").Append(text).Append("](").Append(link.Url).AppendLine(")");
+            var text = string.IsNullOrWhiteSpace(link.Text) ? SanitizeUrl(link.Url) : EscapeInline(link.Text);
+            builder.Append(i + 1).Append(". [").Append(text).Append("](").Append(SanitizeUrl(link.Url)).AppendLine(")");
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;
     }
 
-    private static string EscapeLinkText(string text) =>
-        text.Replace("[", "\\[").Replace("]", "\\]");
+    /// <summary>Escapes inline Markdown/HTML metacharacters and collapses newlines.</summary>
+    private static string EscapeInline(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(text.Length);
+        foreach (var ch in text)
+        {
+            switch (ch)
+            {
+                case '\\': builder.Append("\\\\"); break;
+                case '`': builder.Append("\\`"); break;
+                case '*': builder.Append("\\*"); break;
+                case '_': builder.Append("\\_"); break;
+                case '[': builder.Append("\\["); break;
+                case ']': builder.Append("\\]"); break;
+                case '<': builder.Append("&lt;"); break;
+                case '>': builder.Append("&gt;"); break;
+                case '|': builder.Append("\\|"); break;
+                case '\r':
+                case '\n': builder.Append(' '); break;
+                default: builder.Append(ch); break;
+            }
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Wraps a URL as a Markdown link destination. Angle brackets let the
+    /// destination contain parentheses, but not <c>&lt;</c>, <c>&gt;</c> or
+    /// newlines, which are removed/encoded.
+    /// </summary>
+    private static string SanitizeUrl(string url)
+    {
+        var cleaned = url
+            .Replace("<", "%3C")
+            .Replace(">", "%3E")
+            .Replace("\r", string.Empty)
+            .Replace("\n", string.Empty);
+
+        return "<" + cleaned + ">";
+    }
 }

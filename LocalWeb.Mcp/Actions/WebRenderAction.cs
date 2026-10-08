@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using LocalWeb.Mcp.Fetch;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
 namespace LocalWeb.Mcp.Actions;
@@ -30,7 +31,7 @@ public sealed class WebRenderAction
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
-            return OutputFormatter.FormatError($"'{url}' is not an absolute URL.");
+            throw new McpException($"'{url}' is not an absolute URL.");
         }
 
         try
@@ -42,7 +43,12 @@ public sealed class WebRenderAction
         catch (LocalWebException ex)
         {
             _logger.LogWarning(ex, "web_render failed for {Url}.", url);
-            return OutputFormatter.FormatError(ex.Message);
+            throw new McpException(ex.Message);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "web_render failed unexpectedly for {Url}.", url);
+            throw new McpException($"Failed to render '{url}'.");
         }
     }
 }

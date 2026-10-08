@@ -11,9 +11,15 @@ namespace LocalWeb.Mcp.Fetch;
 /// gets its own browser context (closed afterwards) and the number of
 /// concurrently open pages is capped by <c>MaxConcurrentBrowserPages</c>.
 ///
-/// Every subresource request is validated through <see cref="UrlGuard"/> and
-/// blocked if it targets a forbidden address. Images, media and fonts are
-/// blocked outright for speed; they are not needed for text extraction.
+/// Requests are intercepted at the context level so popups are covered, service
+/// workers and WebSockets are blocked, and images/media/fonts are dropped for
+/// speed. The page URL is re-validated after navigation because a redirect can
+/// move the page to an address the route handler never saw.
+///
+/// Known limitation: unlike the HTTP path, the browser cannot be pinned to the
+/// exact validated IP — Chromium resolves the host again when it connects.
+/// <see cref="UrlGuard"/> therefore acts as a check, not a hard pin, for the
+/// browser path.
 /// </summary>
 public sealed class PlaywrightFetcher : IAsyncDisposable
 {
@@ -37,6 +43,8 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
 
     public async Task<RenderedPage> RenderAsync(Uri url, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         await _guard.ValidateAsync(url, cancellationToken).ConfigureAwait(false);
         await _pageLimit.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -48,10 +56,31 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
             {
                 UserAgent = _options.UserAgent,
                 JavaScriptEnabled = true,
+                AcceptDownloads = false,
+                // Service workers can issue requests that route handlers never see.
+                ServiceWorkers = ServiceWorkerPolicy.Block,
             }).ConfigureAwait(false);
 
+            // Route at the context level (covers popups); WebSockets bypass routes
+            // entirely, so block them outright — they are not needed for content.
+            await context.RouteAsync("**/*", HandleRouteAsync).ConfigureAwait(false);
+            await context.RouteWebSocketAsync("**/*", route => { _ = route.CloseAsync(); }).ConfigureAwait(false);
+
             var page = await context.NewPageAsync().ConfigureAwait(false);
-            await page.RouteAsync("**/*", HandleRouteAsync).ConfigureAwait(false);
+
+            // Playwright APIs take no CancellationToken; close the context if the
+            // caller cancels so an in-flight render does not outlive the request.
+            await using var registration = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    _ = context.CloseAsync();
+                }
+                catch (PlaywrightException)
+                {
+                    // Context already gone.
+                }
+            });
 
             var timeout = _options.BrowserTimeoutSeconds * 1000;
             try
@@ -67,17 +96,41 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
                 _logger.LogDebug(ex, "Navigation to {Url} did not reach network idle; using loaded DOM.", url);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // A redirect is not seen by the route handler; re-validate the final URL.
+            if (Uri.TryCreate(page.Url, UriKind.Absolute, out var finalUri))
+            {
+                await _guard.ValidateAsync(finalUri, cancellationToken).ConfigureAwait(false);
+            }
+
             var html = await page.ContentAsync().ConfigureAwait(false);
             return new RenderedPage(page.Url, html);
         }
+        catch (PlaywrightException ex)
+        {
+            throw new LocalWebException(
+                $"The headless browser could not render {url}: {ex.Message} " +
+                "Make sure Chromium is installed (run the server with --install-browser).", ex);
+        }
         finally
         {
-            if (context is not null)
+            try
             {
-                await context.DisposeAsync().ConfigureAwait(false);
+                if (context is not null)
+                {
+                    await context.DisposeAsync().ConfigureAwait(false);
+                }
             }
-
-            _pageLimit.Release();
+            catch (PlaywrightException ex)
+            {
+                _logger.LogDebug(ex, "Failed to dispose the browser context for {Url}.", url);
+            }
+            finally
+            {
+                // Release unconditionally, even if context disposal threw.
+                _pageLimit.Release();
+            }
         }
     }
 
@@ -131,6 +184,8 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
 
     private async Task<IBrowser> GetBrowserAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         if (_browser is { IsConnected: true })
         {
             return _browser;
@@ -144,10 +199,28 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
                 return _browser;
             }
 
+            if (_browser is not null)
+            {
+                // The previous browser disconnected; dispose it before replacing it.
+                try
+                {
+                    await _browser.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (PlaywrightException ex)
+                {
+                    _logger.LogDebug(ex, "Failed to dispose a disconnected browser.");
+                }
+
+                _browser = null;
+            }
+
             _playwright ??= await Playwright.CreateAsync().ConfigureAwait(false);
             _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
+                // --no-sandbox is required in many container/CI environments where
+                // the Chromium sandbox is unavailable. The process runs as a
+                // non-privileged user and only renders untrusted pages.
                 Args = ["--no-sandbox", "--disable-dev-shm-usage"],
             }).ConfigureAwait(false);
 
@@ -169,13 +242,36 @@ public sealed class PlaywrightFetcher : IAsyncDisposable
 
         _disposed = true;
 
+        // Wait for in-flight renders to release their page slots before shutting
+        // the browser down, rather than tearing resources down underneath them.
+        var permits = Math.Max(1, _options.MaxConcurrentBrowserPages);
+        for (var i = 0; i < permits; i++)
+        {
+            try
+            {
+                await _pageLimit.WaitAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
+        }
+
         if (_browser is not null)
         {
-            await _browser.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await _browser.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException ex)
+            {
+                _logger.LogDebug(ex, "Failed to dispose the browser during shutdown.");
+            }
         }
 
         _playwright?.Dispose();
-        _pageLimit.Dispose();
-        _initLock.Dispose();
+
+        // The semaphores are deliberately left undisposed: the process is exiting
+        // and disposing them could throw inside late request interceptors.
     }
 }

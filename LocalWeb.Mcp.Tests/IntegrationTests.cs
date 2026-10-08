@@ -10,9 +10,9 @@ using Microsoft.Extensions.Logging;
 namespace LocalWeb.Mcp.Tests;
 
 /// <summary>
-/// End-to-end tests. They need a local SearXNG instance (for search) and an
-/// installed Playwright Chromium (for the browser paths), so they are skipped
-/// unless <c>LOCALWEB_INTEGRATION=1</c> is set.
+/// End-to-end tests for the fetch pipeline. They start a local Kestrel server
+/// and need an installed Playwright Chromium, so they are skipped unless
+/// <c>LOCALWEB_INTEGRATION=1</c> is set.
 /// </summary>
 public sealed class IntegrationTests
 {
@@ -20,7 +20,7 @@ public sealed class IntegrationTests
         Environment.GetEnvironmentVariable("LOCALWEB_INTEGRATION") == "1";
 
     private const string SkipReason =
-        "Integration tests require LOCALWEB_INTEGRATION=1 plus a local SearXNG and an installed Playwright browser.";
+        "Integration tests require LOCALWEB_INTEGRATION=1 and an installed Playwright browser.";
 
     [SkippableFact]
     public async Task WebFetch_static_page_uses_http_then_cache()

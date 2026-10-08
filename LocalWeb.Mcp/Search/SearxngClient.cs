@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using LocalWeb.Mcp.Options;
 using Microsoft.Extensions.Logging;
@@ -57,13 +58,17 @@ public sealed class SearxngClient : IDisposable
         var requestUri = BuildRequestUri(query, language, page);
         _logger.LogDebug("Querying SearXNG: {Uri}", requestUri);
 
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.HttpTimeoutSeconds));
+        var token = timeoutCts.Token;
+
         HttpResponseMessage response;
         try
         {
-            response = await _http.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            response = await _http.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, token)
                 .ConfigureAwait(false);
         }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             throw new LocalWebException(
                 $"SearXNG did not respond within {_options.HttpTimeoutSeconds}s at {_options.SearxngUrl}.", ex);
@@ -91,7 +96,11 @@ public sealed class SearxngClient : IDisposable
             string body;
             try
             {
-                body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                body = await ReadLimitedBodyAsync(response, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new LocalWebException("Reading the SearXNG response timed out.", ex);
             }
             catch (Exception ex) when (ex is IOException or HttpRequestException)
             {
@@ -112,6 +121,10 @@ public sealed class SearxngClient : IDisposable
             {
                 throw new LocalWebException("SearXNG returned an empty JSON response.");
             }
+
+            // An explicit JSON null overwrites the collection initializers.
+            parsed.Results ??= [];
+            parsed.Suggestions ??= [];
 
             if (parsed.Results.Count > maxResults)
             {
@@ -149,6 +162,27 @@ public sealed class SearxngClient : IDisposable
         };
 
         return builder.Uri;
+    }
+
+    private async Task<string> ReadLimitedBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+
+        while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            var remaining = _options.MaxResponseBytes - (int)buffer.Length;
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            buffer.Write(chunk, 0, Math.Min(read, remaining));
+        }
+
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
     public void Dispose()

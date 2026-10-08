@@ -92,10 +92,13 @@ Then add the policy from [`AGENTS.md`](AGENTS.md): prefer Exa, fall back to
 
 | Tool | Description |
 | --- | --- |
-| `web_search(query, maxResults=8, language="auto", page=1, bypassCache=false)` | Search via SearXNG. Returns titles, URLs and snippets. |
+| `web_search(query, maxResults=0, language="auto", page=1, bypassCache=false)` | Search via SearXNG. Returns titles, URLs and snippets. `maxResults=0` uses the configured default. |
 | `web_fetch(url, bypassCache=false)` | Fetch a page as Markdown. HTTP first, browser fallback for JavaScript pages. |
 | `web_render(url, bypassCache=false)` | Render a page in a headless browser and return Markdown. |
 | `web_extract_links(url, maxLinks=50, bypassCache=false)` | Return the http(s) links found on a page as Markdown. |
+
+Expected failures are reported as MCP errors (`isError = true`) with a
+human-readable message, so a client can tell a failure apart from page content.
 
 ## Configuration
 
@@ -115,10 +118,13 @@ environment variables (`LocalWeb__SearxngUrl=...`) and command-line options.
 | `BrowserTimeoutSeconds` | `30` | |
 | `MaxRedirects` | `5` | Each redirect target is re-validated. |
 | `MaxConcurrentBrowserPages` | `2` | |
-| `AllowedSchemes` | `["http","https"]` | |
-| `AllowedPorts` | `[80,443]` | Add a port only if you must. |
+| `AllowedSchemes` | `["http","https"]` | A configured list **replaces** the default (e.g. `["https"]` narrows egress). |
+| `AllowedPorts` | `[80,443]` | A configured list **replaces** the default. |
+| `DefaultMaxResults` | `8` | Default for `web_search` when `maxResults` is `0`. |
+| `MaxMaxResults` | `20` | Upper bound `web_search` clamps to. |
+| `MinExtractCharsForBrowser` | `400` | Extracted text below this triggers the browser fallback. |
 | `UserAgent` | `LocalWebMcp/1.0` | |
-| `AllowLoopbackForTests` | `false` | **Testing only.** Disables SSRF blocking for loopback. |
+| `AllowLoopbackForTests` | `false` | **Testing only.** Disables SSRF blocking for loopback; logs a warning at startup when enabled. |
 
 Command-line options: `--searxng-url`, `--cache-path`, `--log-level`,
 `--http-timeout`, `--browser-timeout`, `--install-browser`,
@@ -133,18 +139,41 @@ dotnet run --project LocalWeb.Mcp -- --searxng-url http://127.0.0.1:8080 --log-l
 
 ## Security
 
-`UrlGuard` validates every outbound request (HTTP and browser subresources):
+`UrlGuard` validates every outbound request:
 
 - only allowed schemes and ports;
 - no URLs containing credentials;
 - DNS is resolved and **every** address is checked;
 - loopback, link-local (including `169.254.169.254`), private ranges
   (`10/8`, `172.16/12`, `192.168/16`), `100.64/10`, multicast, unspecified and
-  their IPv6 equivalents (`::1`, `fc00::/7`, `fe80::/10`, IPv4-mapped IPv6) are
-  rejected;
-- redirects are followed manually and re-validated;
-- the HTTP socket connects to the exact validated IP (anti DNS-rebinding);
-- browser requests are filtered with `page.RouteAsync`.
+  their IPv6 equivalents (`::1`, `fc00::/7`, `fe80::/10`, IPv4-mapped IPv6, and
+  the NAT64/6to4/Teredo/IPv4-compatible forms) are rejected;
+- resolved addresses are never echoed back to the client.
+
+For the HTTP path specifically:
+
+- redirects are followed manually and re-validated at every hop;
+- the socket is opened against the exact validated IP (`ConnectCallback`), which
+  closes the DNS-rebinding window, and HTTP proxies are disabled so the pinning
+  cannot be silently bypassed;
+- the whole request (connect, headers **and body**) is bounded by
+  `HttpTimeoutSeconds`, and the body is capped at `MaxResponseBytes`.
+
+The browser path (`web_render` / the `web_fetch` fallback) is a check, not a hard
+pin, and has residual risk you should be aware of when rendering untrusted URLs:
+
+- requests are intercepted at the context level, service workers are blocked and
+  WebSockets are disabled; images/media/fonts are dropped for speed;
+- the final page URL is re-validated after navigation (redirect targets are not
+  seen by the router);
+- **limitation:** Chromium resolves the host itself when it connects, so unlike
+  the HTTP path the browser cannot be pinned to the validated IP; a DNS-rebinding
+  answer could still reach an internal address. Chromium also runs with
+  `--no-sandbox` (needed in most containers), so treat browser rendering of
+  hostile pages as best-effort isolation.
+
+All web-derived text (titles, snippets, link text and URLs) is escaped before it
+is embedded in the Markdown returned to the model.
 
 ## Tests
 

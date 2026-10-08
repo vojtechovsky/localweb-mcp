@@ -5,6 +5,7 @@ using LocalWeb.Mcp.Options;
 using LocalWeb.Mcp.Search;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
 namespace LocalWeb.Mcp.Actions;
@@ -34,7 +35,7 @@ public sealed class WebSearchAction
     [Description("Search the web via the local SearXNG instance. Returns titles, URLs and snippets.")]
     public async Task<string> WebSearchAsync(
         [Description("Search query.")] string query,
-        [Description("Maximum number of results, 1-20.")] int maxResults = 8,
+        [Description("Maximum number of results; 0 uses the configured default.")] int maxResults = 0,
         [Description("Language code such as cs or en, or 'auto'.")] string language = "auto",
         [Description("Page number, 1-based.")] int page = 1,
         [Description("Skip the cache and query SearXNG again.")] bool bypassCache = false,
@@ -42,7 +43,12 @@ public sealed class WebSearchAction
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return OutputFormatter.FormatError("the search query must not be empty.");
+            throw new McpException("The search query must not be empty.");
+        }
+
+        if (maxResults <= 0)
+        {
+            maxResults = _options.DefaultMaxResults;
         }
 
         maxResults = Math.Clamp(maxResults, 1, _options.MaxMaxResults);
@@ -58,10 +64,19 @@ public sealed class WebSearchAction
             var cached = await _cache.GetAsync(cacheKey, cancellationToken).ConfigureAwait(false);
             if (cached is not null)
             {
-                var entry = JsonSerializer.Deserialize<CachedSearch>(cached);
+                CachedSearch? entry = null;
+                try
+                {
+                    entry = JsonSerializer.Deserialize<CachedSearch>(cached);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Ignoring a corrupt search cache entry.");
+                }
+
                 if (entry is { IsError: true })
                 {
-                    return entry.Error!;
+                    throw new McpException(entry.Error ?? "Cached error.");
                 }
 
                 if (entry?.Text is not null)
@@ -77,28 +92,29 @@ public sealed class WebSearchAction
                 .ConfigureAwait(false);
             var text = OutputFormatter.FormatSearch(query, response);
 
-            await _cache.SetAsync(
-                    cacheKey,
-                    JsonSerializer.Serialize(new CachedSearch(false, null, text)),
-                    TimeSpan.FromMinutes(_options.SearchTtlMinutes),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            await TryCacheAsync(cacheKey, new CachedSearch(false, null, text),
+                TimeSpan.FromMinutes(_options.SearchTtlMinutes), cancellationToken).ConfigureAwait(false);
 
             return text;
         }
         catch (LocalWebException ex)
         {
             _logger.LogWarning(ex, "web_search failed for {Query}.", query);
-            var text = OutputFormatter.FormatError(ex.Message);
+            await TryCacheAsync(cacheKey, new CachedSearch(true, ex.Message, null),
+                TimeSpan.FromMinutes(_options.ErrorTtlMinutes), CancellationToken.None).ConfigureAwait(false);
+            throw new McpException(ex.Message);
+        }
+    }
 
-            await _cache.SetAsync(
-                    cacheKey,
-                    JsonSerializer.Serialize(new CachedSearch(true, text, null)),
-                    TimeSpan.FromMinutes(_options.ErrorTtlMinutes),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-
-            return text;
+    private async Task TryCacheAsync(string key, CachedSearch entry, TimeSpan ttl, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _cache.SetAsync(key, JsonSerializer.Serialize(entry), ttl, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to write a search cache entry.");
         }
     }
 
