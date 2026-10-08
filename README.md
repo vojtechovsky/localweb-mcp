@@ -75,6 +75,27 @@ A `403` means `json` is missing from `search.formats` in
 `core-config/settings.yml` (or the config was not reloaded). The compose file
 binds the port to `127.0.0.1` only.
 
+### Operations, resources and restart
+
+Typical idle footprint: **~120 MB RAM** (~115 MB `searxng-core` + ~6 MB
+`searxng-valkey`), near-zero CPU, **~450 MB disk** for the images plus a small
+data volume. Startup after the first image pull is **a few seconds**
+(`--searxng-up` waits for the JSON API before returning); the first query after a
+cold start can be slower while the engines warm up.
+
+The services use `restart: unless-stopped`, and Docker starts at boot, so the
+instance **comes back automatically after a reboot** with no action needed. Data
+lives in the named volume `searxng_core-data` and survives restarts.
+
+- You do **not** need to stop Docker before shutting the machine down.
+- Use `--searxng-down` to stop and remove the containers (frees the RAM and
+  prevents auto-start until the next `--searxng-up`).
+- `--searxng-status` reports whether the API answers.
+- If the Docker daemon is stopped, the instance is simply unavailable:
+  `web_search` returns an actionable error and the other tools keep working.
+- `unless-stopped` (not `always`) means a manual `docker stop` is respected and
+  survives a daemon restart.
+
 ## 2. Build and install the browser
 
 ```bash
