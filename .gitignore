@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+*.user
+
+# Local cache / data
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets and local environment
+.env
+infra/searxng/.env
+
+# IDE
+.vs/
+.idea/
+*.swp

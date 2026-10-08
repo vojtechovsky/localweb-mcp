@@ -1,0 +1,40 @@
+# SearXNG instance for LocalWeb MCP.
+#
+# Based on the upstream compose template:
+#   https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml
+# Docs: https://docs.searxng.org/admin/installation-docker.html
+#
+# This deployment is intended to run locally only. The published port is bound
+# to 127.0.0.1 via SEARXNG_HOST in .env, so the instance is never reachable from
+# other machines. Do not change that unless you really know what you are doing.
+#
+# The `valkey` service is unused while the limiter is disabled
+# (server.limiter: false in core-config/settings.yml). It is kept here because
+# the upstream template ships with it and it becomes required if you ever turn
+# the limiter on.
+
+name: searxng
+
+services:
+  core:
+    container_name: searxng-core
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
+    restart: always
+    ports:
+      - ${SEARXNG_HOST:+${SEARXNG_HOST}:}${SEARXNG_PORT:-8080}:${SEARXNG_PORT:-8080}
+    env_file: ./.env
+    volumes:
+      - ./core-config/:/etc/searxng/:Z
+      - core-data:/var/cache/searxng/
+
+  valkey:
+    container_name: searxng-valkey
+    image: docker.io/valkey/valkey:9-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: always
+    volumes:
+      - valkey-data:/data/
+
+volumes:
+  core-data:
+  valkey-data:

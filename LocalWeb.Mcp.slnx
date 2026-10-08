@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LocalWeb.Mcp.Tests/LocalWeb.Mcp.Tests.csproj" />
+  <Project Path="LocalWeb.Mcp/LocalWeb.Mcp.csproj" />
+</Solution>

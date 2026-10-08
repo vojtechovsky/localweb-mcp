@@ -1,0 +1,100 @@
+using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
+using Microsoft.Extensions.Logging;
+
+namespace LocalWeb.Mcp.Fetch;
+
+/// <summary>
+/// Extracts http(s) links from HTML. Relative URLs are resolved against the
+/// page URL (honouring a <c>&lt;base href&gt;</c> when present) and duplicate
+/// targets are removed while keeping the first anchor text seen.
+/// </summary>
+public sealed class LinkExtractor
+{
+    private readonly ILogger<LinkExtractor> _logger;
+    private readonly HtmlParser _parser = new();
+
+    public LinkExtractor(ILogger<LinkExtractor> logger)
+    {
+        _logger = logger;
+    }
+
+    public IReadOnlyList<LinkItem> Extract(string html, string pageUrl, int maxLinks)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return [];
+        }
+
+        IDocument document;
+        try
+        {
+            document = _parser.ParseDocument(html);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to parse HTML for link extraction.");
+            return [];
+        }
+
+        var baseUri = ResolveBaseUri(document, pageUrl);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var links = new List<LinkItem>();
+
+        foreach (var anchor in document.QuerySelectorAll("a[href]"))
+        {
+            var href = anchor.GetAttribute("href");
+            if (string.IsNullOrWhiteSpace(href) || href.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (!Uri.TryCreate(baseUri, href, out var absolute) ||
+                absolute.Scheme is not ("http" or "https"))
+            {
+                continue;
+            }
+
+            var target = absolute.ToString();
+            if (!seen.Add(target))
+            {
+                continue;
+            }
+
+            links.Add(new LinkItem(Normalize(anchor.TextContent), target));
+            if (links.Count >= maxLinks)
+            {
+                break;
+            }
+        }
+
+        return links;
+    }
+
+    private static Uri? ResolveBaseUri(IDocument document, string pageUrl)
+    {
+        if (!Uri.TryCreate(pageUrl, UriKind.Absolute, out var page))
+        {
+            return null;
+        }
+
+        var baseHref = document.QuerySelector("base[href]")?.GetAttribute("href");
+        if (!string.IsNullOrWhiteSpace(baseHref) &&
+            Uri.TryCreate(page, baseHref, out var resolved))
+        {
+            return resolved;
+        }
+
+        return page;
+    }
+
+    private static string Normalize(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    }
+}

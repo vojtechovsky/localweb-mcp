@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/.git/
+**/.vs/
+**/.idea/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.env

@@ -1,0 +1,24 @@
+# Minimal SearXNG settings for a private, local-only instance used by LocalWeb MCP.
+#
+# Mounted read/write at /etc/searxng inside the container. Only the keys we
+# override are listed here; everything else comes from the upstream defaults.
+#
+# Docs: https://docs.searxng.org/admin/settings/index.html
+
+use_default_settings: true
+
+server:
+  # Must match SEARXNG_SECRET in ../.env. The environment variable wins over
+  # this value (an explicit secret_key here is only a fallback).
+  # Generate one with: openssl rand -hex 32
+  secret_key: "change-me-run-openssl-rand-hex-32"
+
+  # The limiter needs Valkey and is unnecessary for a single local user.
+  limiter: false
+
+search:
+  # The default build only exposes HTML. The JSON API (used by LocalWeb MCP)
+  # must be enabled explicitly, otherwise requests with `format=json` return 403.
+  formats:
+    - html
+    - json
