@@ -23,7 +23,13 @@ if (commandLine.InstallBrowser)
     return Microsoft.Playwright.Program.Main(["install", "chromium"]);
 }
 
-var builder = Host.CreateApplicationBuilder([]);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = [],
+    // Resolve appsettings.json against the binary location so the server works
+    // no matter which working directory the MCP client launches it from.
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 // Command-line overrides win over appsettings.json and environment variables.
 builder.Configuration.AddInMemoryCollection(commandLine.ToConfiguration());

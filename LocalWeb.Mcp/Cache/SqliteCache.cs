@@ -22,7 +22,11 @@ public sealed class SqliteCache : IAsyncDisposable
         _logger = logger;
 
         var path = options.Value.CachePath;
-        var fullPath = Path.GetFullPath(path);
+        // Relative paths resolve against the binary location, not the client's
+        // working directory, so the cache has a stable home after install.
+        var fullPath = Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(AppContext.BaseDirectory, path);
         var directory = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(directory))
         {
