@@ -83,6 +83,19 @@ builder.Services
 
 var app = builder.Build();
 
+// SearXNG maintenance commands: manage the bundled instance and exit.
+if (commandLine.SearxngUp || commandLine.SearxngDown || commandLine.SearxngStatus)
+{
+    var manager = app.Services.GetRequiredService<SearxngManager>();
+    var success = commandLine.SearxngDown
+        ? await manager.DownAsync(CancellationToken.None)
+        : commandLine.SearxngStatus
+            ? await manager.StatusAsync(CancellationToken.None)
+            : await manager.UpAsync(CancellationToken.None);
+
+    return success ? 0 : 1;
+}
+
 var options = app.Services.GetRequiredService<IOptions<LocalWebOptions>>().Value;
 if (options.AllowLoopbackForTests)
 {

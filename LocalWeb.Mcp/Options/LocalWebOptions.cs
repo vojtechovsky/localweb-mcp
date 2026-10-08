@@ -12,6 +12,13 @@ public sealed class LocalWebOptions
     /// <summary>Base URL of the local SearXNG instance (no trailing slash required).</summary>
     public string SearxngUrl { get; set; } = "http://127.0.0.1:8080";
 
+    /// <summary>
+    /// Optional directory containing the bundled SearXNG Compose files
+    /// (<c>docker-compose.yml</c>, <c>core-config/</c>, <c>.env.example</c>).
+    /// Defaults to <c>infra/searxng</c> next to the application binary.
+    /// </summary>
+    public string? SearxngInfraDir { get; set; }
+
     /// <summary>Path to the SQLite cache file. Relative paths are resolved against the application base directory (<c>AppContext.BaseDirectory</c>).</summary>
     public string CachePath { get; set; } = "cache.db";
 

@@ -21,6 +21,12 @@
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Ship the SearXNG Compose files so the searxng maintenance commands work
+         after publish. The real .env (with the secret) is never bundled. -->
+    <None Include="..\infra\searxng\**\*"
+          Exclude="..\infra\searxng\.env"
+          Link="infra\searxng\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

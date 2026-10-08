@@ -38,6 +38,11 @@ public static class CommandLineUtilities
             yield return new($"{prefix}{nameof(LocalWebOptions.SearxngUrl)}", options.SearxngUrl);
         }
 
+        if (!string.IsNullOrWhiteSpace(options.SearxngInfraDir))
+        {
+            yield return new($"{prefix}{nameof(LocalWebOptions.SearxngInfraDir)}", options.SearxngInfraDir);
+        }
+
         if (!string.IsNullOrWhiteSpace(options.CachePath))
         {
             yield return new($"{prefix}{nameof(LocalWebOptions.CachePath)}", options.CachePath);

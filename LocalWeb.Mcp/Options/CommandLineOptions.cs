@@ -14,6 +14,10 @@ public sealed class CommandLineOptions
     [Option("searxng-url", HelpText = "Base URL of the local SearXNG instance.")]
     public string? SearxngUrl { get; set; }
 
+    /// <summary>Directory containing the bundled SearXNG Compose files.</summary>
+    [Option("searxng-infra-dir", HelpText = "Directory containing the bundled SearXNG Compose files.")]
+    public string? SearxngInfraDir { get; set; }
+
     /// <summary>Path to the SQLite cache file.</summary>
     [Option("cache-path", HelpText = "Path to the SQLite cache file.")]
     public string? CachePath { get; set; }
@@ -41,4 +45,16 @@ public sealed class CommandLineOptions
     /// <summary>Testing only: allows loopback targets (disables loopback SSRF protection).</summary>
     [Option("allow-loopback", HelpText = "TESTING ONLY: allow loopback targets (disables loopback SSRF protection).")]
     public bool AllowLoopback { get; set; }
+
+    /// <summary>When set, starts the bundled SearXNG instance (docker compose up -d) and exits.</summary>
+    [Option("searxng-up", HelpText = "Start the bundled SearXNG instance (docker compose up -d) and exit.")]
+    public bool SearxngUp { get; set; }
+
+    /// <summary>When set, stops the bundled SearXNG instance (docker compose down) and exits.</summary>
+    [Option("searxng-down", HelpText = "Stop the bundled SearXNG instance (docker compose down) and exit.")]
+    public bool SearxngDown { get; set; }
+
+    /// <summary>When set, reports whether the configured SearXNG API is reachable and exits.</summary>
+    [Option("searxng-status", HelpText = "Report whether the configured SearXNG API is reachable and exit.")]
+    public bool SearxngStatus { get; set; }
 }

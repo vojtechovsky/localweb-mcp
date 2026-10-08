@@ -32,8 +32,28 @@ server rather than in prompt instructions.
 
 ## 1. Run SearXNG
 
-The infra files live in [`infra/searxng`](infra/searxng). They follow the
-official container template.
+`web_search` needs a SearXNG instance; the other three tools do not. The Compose
+files live in [`infra/searxng`](infra/searxng) (official container template) and
+are shipped with the published binary, so the server can manage the instance for
+you:
+
+```bash
+# Start it (generates .env with a fresh secret, then docker compose up -d,
+# and waits until the JSON API answers):
+dotnet run --project LocalWeb.Mcp -- --searxng-up
+
+# Check whether it is reachable:
+dotnet run --project LocalWeb.Mcp -- --searxng-status
+
+# Stop it:
+dotnet run --project LocalWeb.Mcp -- --searxng-down
+```
+
+These commands need Docker + Docker Compose on the machine. For the published
+binary, run `dotnet /path/to/LocalWeb.Mcp.dll --searxng-up`.
+
+<details>
+<summary>Manual setup (equivalent)</summary>
 
 ```bash
 cd infra/searxng
@@ -48,6 +68,8 @@ docker compose up -d
 # Acceptance: the JSON API must return a "results" array.
 curl "http://127.0.0.1:8080/search?q=test&format=json"
 ```
+
+</details>
 
 A `403` means `json` is missing from `search.formats` in
 `core-config/settings.yml` (or the config was not reloaded). The compose file
@@ -108,6 +130,7 @@ environment variables (`LocalWeb__SearxngUrl=...`) and command-line options.
 | Setting | Default | Notes |
 | --- | --- | --- |
 | `SearxngUrl` | `http://127.0.0.1:8080` | SearXNG base URL. |
+| `SearxngInfraDir` | `infra/searxng` next to the binary | Compose files used by the `--searxng-*` commands. |
 | `CachePath` | `cache.db` | SQLite cache file. |
 | `SearchTtlMinutes` | `180` | Search result TTL. |
 | `FetchTtlMinutes` | `720` | Page TTL. |
@@ -126,10 +149,11 @@ environment variables (`LocalWeb__SearxngUrl=...`) and command-line options.
 | `UserAgent` | `LocalWebMcp/1.0` | |
 | `AllowLoopbackForTests` | `false` | **Testing only.** Enabled solely by the `--allow-loopback` command-line flag; configuration/env cannot set it. |
 
-Command-line options: `--searxng-url`, `--cache-path`, `--log-level`,
-`--http-timeout`, `--browser-timeout`, `--install-browser`,
-`--install-browser-deps`, `--allow-loopback` (testing only). Unknown arguments
-are ignored, and help/errors are written to stderr.
+Command-line options: `--searxng-url`, `--searxng-infra-dir`, `--cache-path`,
+`--log-level`, `--http-timeout`, `--browser-timeout`, `--install-browser`,
+`--install-browser-deps`, `--searxng-up`, `--searxng-down`, `--searxng-status`,
+`--allow-loopback` (testing only). Unknown arguments are ignored, and
+help/errors are written to stderr.
 
 Example:
 

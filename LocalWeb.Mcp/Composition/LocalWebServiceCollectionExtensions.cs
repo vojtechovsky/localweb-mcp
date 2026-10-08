@@ -18,6 +18,7 @@ public static class LocalWebServiceCollectionExtensions
         services.AddSingleton<UrlGuard>();
         services.AddSingleton<SqliteCache>();
         services.AddSingleton<SearxngClient>();
+        services.AddSingleton<SearxngManager>();
         services.AddSingleton<HttpFetcher>();
         services.AddSingleton<PlaywrightFetcher>();
         services.AddSingleton<ContentExtractor>();
